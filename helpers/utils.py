@@ -24,8 +24,8 @@ def load_config(config_file):
 
 def filename(configs):
     """ Creates a readable filename convention for trained models """
-    dataset_name = "demo" if configs["data_directory"] == "demo" else \
-        os.path.basename(os.path.normpath(configs["data_directory"]))
+    dataset_name = "demo" if configs["images_directory"] == "demo" else \
+        os.path.basename(os.path.normpath(configs["images_directory"]))
     file_name = "data:{}_trans:{}-{}-{}_mod:{}-{}-{}_tr:{}-{}-{}-{}-{}-{}-{}".format(dataset_name,
                                                                                      configs["transformations"]["resize_dim"],
                                                                                      configs["transformations"]["grayscale"],

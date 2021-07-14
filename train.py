@@ -29,7 +29,8 @@ CONFIG_PATH = "model_configs.yaml"
 config = load_config(CONFIG_PATH)
 
 # data specific configs
-data_directory = config['data_directory']
+data_directory = config['images_directory']
+labels_file = config['labels_file']
 transformations = config['transformations']
 
 # model I/O specific configs
@@ -91,10 +92,13 @@ if data_directory != "demo":
             image_transforms.append(transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)))
 
     # load as pytorch dataset
-    train_images = ImageDataset(images_directory=data_directory, transforms=transforms.Compose(image_transforms))
+    train_images = ImageDataset(images_directory=data_directory, image_labels=labels_file,
+                                transforms=transforms.Compose(image_transforms))
 
     if verbose:
         print("Number of images: " + str(len(train_images)))
+        if labels_file is not None:
+            print("Number of classes: " + str(train_images.n_classes))
 
     # create pytorch data_loader
     data_loader = DataLoader(train_images, batch_size, shuffle=True, num_workers=4)
@@ -169,7 +173,12 @@ elif model == "msggan":
 
 # Conditional MSG-GAN
 elif model == "cmsggan":
-    pass
+    from models.msggan import conditional_msggan
+    depth = int(np.log2(im_resolution) - 1)
+    mode = "grayscale" if transformations['grayscale'] else "rgb"
+    # load the GAN model
+    gan_model = conditional_msggan.MSG_GAN(depth=depth, latent_size=z_dim, n_classes=train_images.n_classes,
+                                           mode=mode, use_ema=True, use_eql=True, ema_decay=0.999, device=device)
 
 else:
     print("Unknown model architecture! Accepted choices are [\"dcgan\", \"wgan-gp\", \"pggan\", \"msggan\"]...")
@@ -187,7 +196,7 @@ if model in ["dcgan", "wgan-gp"]:
 elif model == "pggan":
     from trainers.pggan_train import train
 
-elif model == "msggan":
+elif model == "msggan" or model == "cmsggan":
     from trainers.msggan_train import train
 
 gan_model = train(gan_model, data_loader, train_configs, device=device, checkpoints_fname=filename(config))

@@ -1,18 +1,20 @@
 # DATA SETTINGS
-data_directory: ../../data/syntheye/pentacam/
+data_file: /media/pontikos_nas2/NikolasPontikos/IRD/dataset1_newids.csv
+filenames_col: filepath
+labels_col: gene
 transformations:
   resize_dim: 256
   grayscale: 1
   normalize: 1
 
 # GAN I/O SETTINGS
-model: msggan
+model: cmsggan
 z_dim: 512
 output_im_resolution: 256
 
 # TRAINING SETTINGS
-epochs: 500
-loss_fn: wgan-gp
+epochs: 50
+loss_fn: relativistic-hinge
 batch_size: 16
 n_disc_updates: 1
 lr: 0.003
@@ -20,11 +22,14 @@ beta1: 0.0
 beta2: 0.99
 display_step: 1000
 n_samples_to_generate: 5
-save_checkpoint_steps: 250
+save_checkpoint_steps: 50
 save_tensorboard: 1
 save_weights: 1
 
 # EVALUATION SETTINGS
-weights_path: checkpoints/data:pentacam_trans:256-1-1_mod:msggan-512-256_tr:2000-relativistic-hinge-16-1-0.003-0.0-0.99/GAN_GEN_SHADOW_500.pth
-n_test_samples_to_generate: 50
+weights_path: checkpoints/data:dataset1_newids.csv_trans:256-1-1_mod:cmsggan-512-256_tr:100-relativistic-hinge-16-1-0.003-0.0-0.99/GAN_GEN_SHADOW_100.pth
+classes: all
+n_test_samples: 10
+interpolate_classes: None
 save_grid: 0
+save_individual: 1
