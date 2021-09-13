@@ -80,7 +80,7 @@ class Generator(th.nn.Module):
             self.layers.append(layer)
             self.rgb_converters.append(rgb)
 
-    def forward(self, x):
+    def forward(self, x, *args, **kwargs):
         """
         forward pass of the Generator
         :param x: input noise
@@ -202,7 +202,7 @@ class Discriminator(th.nn.Module):
         # from the Lower level (from CustomLayers). This much parallelism
         # seems enough for me.
 
-    def forward(self, inputs):
+    def forward(self, inputs, *args, **kwargs):
         """
         forward pass of the discriminator
         :param inputs: (multi-scale input images) to the network list[Tensors]
@@ -244,19 +244,27 @@ class MSG_GAN:
 
     def __init__(self, depth=7, latent_size=512, mode="rgb",
                  use_eql=True, use_ema=True, ema_decay=0.999,
-                 device=th.device("cpu")):
+                 device=th.device("cpu"), device_ids=None, calc_fid=False):
         """ constructor for the class """
         from torch.nn import DataParallel
 
         self.gen = Generator(depth, latent_size, mode=mode, use_eql=use_eql).to(device)
 
         # Parallelize them if required:
-        if device == th.device("cuda"):
-            self.gen = DataParallel(self.gen)
-            self.dis = Discriminator(depth, latent_size, mode=mode,
-                                     use_eql=use_eql, gpu_parallelize=True).to(device)
-        else:
-            self.dis = Discriminator(depth, latent_size, mode=mode, use_eql=True).to(device)
+        # if device == th.device("cuda"):
+        #     self.gen = DataParallel(self.gen)
+        #     self.dis = Discriminator(depth, latent_size, mode=mode,
+        #                              use_eql=use_eql, gpu_parallelize=True).to(device)
+        # else:
+        #     self.dis = Discriminator(depth, latent_size, mode=mode, use_eql=True).to(device)
+        if device_ids is not None:
+            from torch.nn import DataParallel
+            if device_ids == "all":
+                self.gen = DataParallel(self.gen, device_ids=th.cuda.device_count())
+                self.dis = DataParallel(self.dis, device_ids=th.cuda.device_count())
+            else:
+                self.gen = DataParallel(self.gen, device_ids=device_ids)
+                self.dis = DataParallel(self.dis, device_ids=device_ids)
 
         # state of the object
         self.use_ema = use_ema
@@ -284,6 +292,12 @@ class MSG_GAN:
         self.dis.eval()
         if self.use_ema:
             self.gen_shadow.eval()
+
+        if calc_fid:
+            from helpers.evaluate import compute_fid
+            self.calc_fid = compute_fid
+        else:
+            self.calc_fid = None
 
     def generate_samples(self, num_samples):
         """
@@ -352,7 +366,7 @@ class MSG_GAN:
         if self.use_ema:
             self.ema_updater(self.gen_shadow, self.gen, self.ema_decay)
 
-        return loss.item()
+        return loss.item(), fake_samples
 
     def create_grid(self, samples, img_files=None):
         """
@@ -383,7 +397,7 @@ class MSG_GAN:
               start=1, num_epochs=12, feedback_factor=10, checkpoint_factor=1,
               data_percentage=100, num_samples=36, display_step=None,
               log_dir=None, sample_dir="./samples",
-              save_dir="./models"):
+              save_dir="./models", global_step=None):
 
         """
         Method for training the network
@@ -441,13 +455,10 @@ class MSG_GAN:
             start_time = timeit.default_timer()  # record time at the start of epoch
 
             print("\nEpoch: %d" % epoch)
-            total_batches = len(iter(data_loader))
 
             # stores the loss averaged over batches
             mean_generator_loss = 0
             mean_discriminator_loss = 0
-
-            # limit = int((data_percentage / 100) * total_batches)
 
             for (i, batch) in tqdm(enumerate(data_loader, 1)):
 
@@ -474,8 +485,8 @@ class MSG_GAN:
                                                        images, loss_fn, n_updates=n_disc_updates)
 
                 # optimize the generator:
-                gen_loss = self.optimize_generator(gen_optim, gan_input,
-                                                   images, loss_fn)
+                gen_loss, fake_samples = self.optimize_generator(gen_optim, gan_input,
+                                                                  images, loss_fn)
 
                 # compute average gen and disc loss (weighted by batch_size)
                 mean_generator_loss += gen_loss * (len(batch)/len(data_loader.dataset))
@@ -537,11 +548,12 @@ class MSG_GAN:
                     # writer.add_image("Reals", real_grid, global_step, dataformats='CHW')
                     writer.add_image("Generator output", fake_grid, global_step, dataformats='CHW')
 
+                    if self.calc_fid is not None:
+                        fid = self.calc_fid(fake_samples[-1].squeeze(), images[-1].squeeze(), device=self.device)
+                        writer.add_scalar("Frechet Inception Distance", fid, global_step)
+
                 # increment the global_step:
                 global_step += 1
-
-                # if i > limit:
-                #     break
 
             # save to tensorboard
             writer.add_scalars("Loss", {'Generator': mean_generator_loss,
@@ -560,6 +572,7 @@ class MSG_GAN:
                     os.makedirs(save_dir, exist_ok=True)
 
                     model_state_dict = {"epoch": epoch,
+                                        "i": global_step,
                                         "gen_state_dict": self.gen.state_dict(),
                                         "disc_state_dict": self.dis.state_dict(),
                                         "gen_optim_state_dict": gen_optim.state_dict(),
@@ -580,8 +593,7 @@ class MSG_GAN:
                     th.save(model_state_dict, save_dir+"/model_state_"+str(epoch))
 
                     if self.use_ema:
-                        gen_shadow_save_file = os.path.join(save_dir, "GAN_GEN_SHADOW_"
-                                                            + str(epoch) + ".pth")
+                        gen_shadow_save_file = os.path.join(save_dir, "model_ema_state_" + str(epoch) + ".pth")
                         th.save(self.gen_shadow.state_dict(), gen_shadow_save_file)
 
         # return the generator and discriminator back to eval mode

@@ -4,6 +4,7 @@ This module contains all the helper functions for dealing with image data and mo
 
 # import libraries
 import os
+import sys
 import numpy as np
 import pandas as pd
 import torch
@@ -55,24 +56,70 @@ def get_noise(n_samples, z_dim, device='cpu'):
 
 class ImageDataset(Dataset):
     """ PyTorch class for Dataset """
-    def __init__(self, data_file, fpath_col_name, lbl_col_name=None, transforms=None):
-
-        # convert dataset csv file into dataframe and acquire list of filenames and labelnames
+    def __init__(self, data_file, fpath_col_name, lbl_col_name=None, class_vals="all", transforms=None):
+        # read dataframe
         df = pd.read_csv(data_file)
-        self.img_dir = list(df[fpath_col_name])
-        self.img_labels = list(df[lbl_col_name]) if lbl_col_name is not None else None
+        if lbl_col_name is not None:
+            if class_vals == "all":
+                self.img_dir = list(df[fpath_col_name])
+                self.img_labels = list(df[lbl_col_name])
+            else:
+                # load selected classes
+                if type(class_vals) == str:
+                    with open(class_vals, 'r') as f:
+                        selected_classes = f.read().splitlines()
+                else:
+                    selected_classes = class_vals
+                # get rows of dataframe for selected classes
+                df_subset = df.loc[df[lbl_col_name].isin(selected_classes)]
+                self.img_dir = list(df_subset[fpath_col_name])
+                self.img_labels = list(df_subset[lbl_col_name])
+
+        else:
+            self.img_dir = list(df[fpath_col_name])
+            self.img_labels = None
+
+        # df = pd.read_csv(data_file)
+        # all_filepaths = list(df[fpath_col_name])
+        # all_labels = list(df[lbl_col_name]) if lbl_col_name is not None else None
+
+        # if all_labels is not None:
+        #     # if a list of specific classes is provided, only select those class examples for the dataset
+        #     if class_vals is not None:
+        #         idxs = []
+        #         for c in class_vals:
+        #             idxs += list(np.where(np.array(all_labels) == c)[0])
+        #         self.img_dir = [all_filepaths[i] for i in idxs]
+        #         self.img_labels = [all_labels[i] for i in idxs]
+        #     else:
+        #         self.img_dir = all_filepaths
+        #         self.img_labels = all_labels
+        # else:
+        #     self.img_dir = all_filepaths
+        #     self.img_labels = None
+
+        # read dataframe
 
         # relevant attributes if classes are provided
-        self.classes = list(np.unique(self.img_labels)) if lbl_col_name is not None else None
-        self.n_classes = len(self.classes) if lbl_col_name is not None else None
-        self.idx2class = dict(zip(range(self.n_classes), self.classes)) if lbl_col_name is not None else None
-        self.class2idx = dict(zip(self.classes, range(self.n_classes))) if lbl_col_name is not None else None
+        self.classes = list(np.unique(self.img_labels)) if self.img_labels is not None else None
+        self.n_classes = len(self.classes) if self.img_labels is not None else None
+        self.idx2class = dict(zip(range(self.n_classes), self.classes)) if self.img_labels is not None else None
+        self.class2idx = dict(zip(self.classes, range(self.n_classes))) if self.img_labels is not None else None
 
         # image transformations list
         self.transform = transforms
 
     def __len__(self):
         return len(self.img_dir)
+
+    def get_samples(self, n_images):
+        # stores the real images
+        real_images = torch.zeros(n_images, 256, 256)
+        filepaths = np.random.choice(len(self.img_dir), size=n_images)
+        for i, f in enumerate(filepaths):
+            real_images[i, :, :] = self.__getitem__(f)[0]
+
+        return real_images
 
     def __getitem__(self, item):
         # create PIL object of item-th image
@@ -186,6 +233,38 @@ def get_gradient_msggan(disc, real, fake, epsilon):
 
     # Calculate the critic's scores on the mixed images
     mixed_scores = disc(mixed_images)
+
+    # Take the gradient of the scores with respect to the images
+    gradient = torch.autograd.grad(
+        # Note: You need to take the gradient of outputs with respect to inputs.
+        # This documentation may be useful, but it should not be necessary:
+        # https://pytorch.org/docs/stable/autograd.html#torch.autograd.grad
+        inputs=mixed_images,
+        outputs=mixed_scores,
+        # These other parameters have to do with the pytorch autograd engine works
+        grad_outputs=torch.ones_like(mixed_scores),
+        create_graph=True,
+        retain_graph=True,
+    )[0]
+    return gradient
+
+
+def get_gradient_biggan(disc, real, r_class, fake, f_class, epsilon):
+    """
+    Return the gradient of the critic's scores with respect to mixes of real and fake images.
+    Parameters:
+        disc: the discriminator/critic model
+        real: a batch of real images
+        fake: a batch of fake images
+        epsilon: a vector of the uniformly random proportions of real/fake per mixed image
+    Returns:
+        gradient: the gradient of the critic's scores, with respect to the mixed image
+    """
+    # Mix the images together
+    mixed_images = real * epsilon + fake * (1 - epsilon)
+    mixed_classes = disc.embed(r_class) * epsilon + disc.embed(f_class) * (1 - epsilon)
+    # Calculate the critic's scores on the mixed images
+    mixed_scores = disc(mixed_images, mixed_classes, y_embedded=True)
 
     # Take the gradient of the scores with respect to the images
     gradient = torch.autograd.grad(
