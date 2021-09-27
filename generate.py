@@ -108,7 +108,7 @@ elif model_name in ["msggan", "cmsggan", "cmsgganv2"]:
                                 True,
                                 classes,
                                 class_mapping,
-                                False,
+                                True,
                                 weights_dir+weights_path,
                                 model_name,
                                 device)

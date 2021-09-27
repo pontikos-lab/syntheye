@@ -10,7 +10,7 @@ transformations:
   normalize: 1
 
 # GAN I/O SETTINGS - Required for either training or testing settings
-model: cmsgganv2
+model: cmsggan
 z_dim: 512
 output_im_resolution: 256
 
@@ -33,15 +33,15 @@ parallel: 1
 device_ids: [0, 1, 2]
 
 # TESTING SETTINGS
-weights_dir: checkpoints/data:all_baf_valid_50deg_filtered3.csvclasses:classes.txt_trans:256-1-1_mod:cmsgganv2-512-256_tr:1000-RAHinge-48-1-0.003-0.003-0.0-0.99/
-weights_path: model_ema_state_350.pth
+weights_dir: checkpoints/checkpoints/data:all_baf_valid_50deg_filtered3.csv_classes:classes.txt_trans:256-1-1_mod:cmsggan-512-256_tr:1000-RAHinge-48-1-0.003-0.003-0.0-0.99/
+weights_path: model_ema_state_100.pth
 gen_classes: all # provide a list or text file of classes to generate
-n_test_samples: 50 # number of test samples per class
+n_test_samples: 100 # number of test samples per class
 evaluate:
   mutual_information: 0
   fid_imagenet: 0
-  fid_eye2gene: 1
-  class_preds_eye2gene: 0
+  fid_eye2gene: 0
+  class_preds_eye2gene: 1
 save_images:
   as_individual: 0
   most_similar: 0

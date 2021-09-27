@@ -9,8 +9,9 @@ import numpy as np
 import torchvision.transforms
 from torch.utils.data import DataLoader, Dataset, TensorDataset
 from helpers.data_utils import get_one_hot_labels, combine_vectors
+from matplotlib import pyplot as plt
 from tqdm import tqdm
-
+from sklearn.metrics import normalized_mutual_info_score, mutual_info_score
 
 class Interpolate(nn.Module):
     """
@@ -247,14 +248,27 @@ def compute_class_confidence(imgs):
 
 def calc_mutual_information(gen_image, real_image):
     """ Computes the mutual information between a machine-generated image and a real image """
-    hist2d, _, _ = np.histogram2d(gen_image.ravel().numpy(), real_image.ravel().numpy())
+    hist2d, _, _ = np.histogram2d(gen_image.numpy().ravel(), real_image.numpy().ravel(), bins=20)
     pxy = hist2d / float(np.sum(hist2d))
     px = np.sum(pxy, axis=1)
     py = np.sum(pxy, axis=0)
     px_py = px[:, None] * py[None, :]
     nzs = pxy > 0
     MI = np.sum(pxy[nzs] * np.log(pxy[nzs] / px_py[nzs]))
+    nxs = px > 0
+    nys = py > 0
+    MI = 2 * MI / (-1 * np.sum(px[nxs] * np.log(px[nxs])) + -1 * np.sum(py[nys] * np.log(py[nys])))
     return MI
+
+
+def calc_l2_norm(gen_imgs, real_imgs):
+    result = torch.sum(gen_imgs**2, dim=(1, 2))[:, None] - 2*torch.einsum('nhw,mhw->nm', gen_imgs, real_imgs) + torch.sum(real_imgs**2, dim=(1,2))[None, :]
+    return result
+
+
+def calc_pearson_corr(gen_image, real_image):
+    from scipy.stats import pearsonr
+    return pearsonr(gen_image.numpy().ravel(), real_image.numpy().ravel())[0]
 
 
 def mutual_information(gen_imgs, real_dataloader, save_most_similar, save_most_different):
@@ -280,11 +294,15 @@ def mutual_information(gen_imgs, real_dataloader, save_most_similar, save_most_d
     intermediate_different_results = []
 
     for real_batch, _ in tqdm(real_dataloader):
-        gen_real = list(product(gen_imgs, real_batch))
-        with ProcessPoolExecutor() as executor:
-            batch_results = [executor.submit(calc_mutual_information, g, r) for g, r in gen_real]
-            for r in concurrent.futures.as_completed(batch_results):
-                intermediate_results.append(r.result())
+        gen_real = list(product(gen_imgs, real_batch.squeeze()))
+        intermediate_results = [calc_pearson_corr(g, r) for g, r in gen_real]
+
+        # with ProcessPoolExecutor() as executor:
+        #     batch_results = [executor.submit(calc_pearson_corr, g, r) for g, r in gen_real]
+        #     # batch_results = [executor.submit(calc_l2_norm, gen_imgs, real_batch.squeeze())]
+        #     for r in concurrent.futures.as_completed(batch_results):
+        #         intermediate_results.append(r.result())
+        #         # intermediate_results += list(r.result().reshape(gen_imgs.shape[0]*real_batch.shape[0]))
 
         assert len(gen_real) == len(intermediate_results)
 
@@ -323,3 +341,36 @@ def mutual_information(gen_imgs, real_dataloader, save_most_similar, save_most_d
     print("Finished in {} seconds".format(round(finish-start, 2)))
 
     return all_results, five_most_similar, five_most_different
+
+# def calc_img_similarity(gen_imgs, real_dataloader, save_most_similar, save_most_different):
+#     """ Compares generated images to training dataset images to see how similar they are """
+#
+#     import time
+#     start = time.perf_counter()
+#
+#     five_most_similar = np.zeros((len(gen_imgs), ))
+#
+#     for g in gen_imgs:
+#         for real_batch, _ in tqdm(real_dataloader):
+#             intermediate_results = [calc_pearson_corr(g, r) for r in real_batch]
+#
+#             gen_real = [gen_real[i] for i in np.argsort(intermediate_results)]
+#             intermediate_results = list(np.sort(intermediate_results))
+#
+#             all_results += intermediate_results
+#             intermediate_results = []
+#
+#     if save_most_similar:
+#         five_most_similar = [most_similar_images[i] for i in np.argsort(intermediate_similar_results)[-5:]]
+#     else:
+#         five_most_similar = None
+#
+#     if save_most_different:
+#         five_most_different = [most_different_images[i] for i in np.argsort(intermediate_different_results)[:5]]
+#     else:
+#         five_most_different = None
+#
+#     finish = time.perf_counter()
+#     print("Finished in {} seconds".format(round(finish-start, 2)))
+#
+#     return all_results, five_most_similar, five_most_different
