@@ -13,6 +13,7 @@ from matplotlib import pyplot as plt
 from tqdm import tqdm
 from sklearn.metrics import normalized_mutual_info_score, mutual_info_score
 
+
 class Interpolate(nn.Module):
     """
     Interpolates between generated data in terms of classes or latent vectors
@@ -247,7 +248,7 @@ def compute_class_confidence(imgs):
 
 
 def calc_mutual_information(gen_image, real_image):
-    """ Computes the mutual information between a machine-generated image and a real image """
+    """ Computes the mutual information between a generated image and a real image """
     hist2d, _, _ = np.histogram2d(gen_image.numpy().ravel(), real_image.numpy().ravel(), bins=20)
     pxy = hist2d / float(np.sum(hist2d))
     px = np.sum(pxy, axis=1)
@@ -262,16 +263,18 @@ def calc_mutual_information(gen_image, real_image):
 
 
 def calc_l2_norm(gen_imgs, real_imgs):
+    """ Computes Euclidean Distance between generated and real images """
     result = torch.sum(gen_imgs**2, dim=(1, 2))[:, None] - 2*torch.einsum('nhw,mhw->nm', gen_imgs, real_imgs) + torch.sum(real_imgs**2, dim=(1,2))[None, :]
     return result
 
 
 def calc_pearson_corr(gen_image, real_image):
+    """ Computes Pearson Correlation Coefficient between generated and real images """
     from scipy.stats import pearsonr
     return pearsonr(gen_image.numpy().ravel(), real_image.numpy().ravel())[0]
 
 
-def mutual_information(gen_imgs, real_dataloader, save_most_similar, save_most_different):
+def calc_img_similarity(gen_imgs, real_dataloader, save_most_similar, save_most_different):
     """ Compares generated images to training dataset images to see how similar they are """
 
     import time

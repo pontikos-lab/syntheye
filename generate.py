@@ -57,7 +57,7 @@ if transformations['normalize']:
 # image_transforms = transforms.Compose(image_transforms)
 
 # 1. Metrics computation
-calc_mutual_info = config['evaluate']['mutual_information']
+calc_im_similarity = config['evaluate']['compute_similarity']
 calc_fid_imagenet = config['evaluate']['fid_imagenet']
 calc_fid_eye2gene = config['evaluate']['fid_eye2gene']
 class_preds_eye2gene = config['evaluate']['class_preds_eye2gene']
@@ -71,9 +71,9 @@ verbose = 1
 # Set seed for reproducibility
 set_seed(1399)
 
-# ============================================
-# Load the real dataset (For testing purposes)
-# ============================================
+# ============================================================
+# Load the real dataset (For comparison with generated images)
+# ============================================================
 
 dataset = ImageDataset(config["data_file"], config["filenames_col"], config["labels_col"], config['train_classes'])
 class_mapping = dataset.class2idx
@@ -120,15 +120,15 @@ else:
 # EVALUATE IMAGES
 # ==========================
 
-# 1. Check that images are not just memorized training set examples using mutual information metric. This will compute a
+# 1. Check that images are not just memorized training set examples using similarity metric. This will compute a
 # distance matrix between each generated image G_i of class C with every real image of class C.
-if calc_mutual_info:
-    from helpers.evaluate import mutual_information
+if calc_im_similarity:
+    from helpers.evaluate import calc_img_similarity
     if verbose:
-        print("Computing Mutual Information between generated and real dataset...")
+        print("Computing similarity between generated and real dataset...")
     if classes is not None:
         # dictionaries for saving results
-        MI_scores_per_class = {gene: None for gene in classes}
+        sim_scores_per_class = {gene: None for gene in classes}
         if save_most_similar:
             top5_similar_images_per_class = {gene: None for gene in classes}
         if save_most_different:
@@ -142,9 +142,9 @@ if calc_mutual_info:
             batch_size = 1024 if len(dataset) > 1024 else len(dataset)
             class_dataloader = DataLoader(class_dataset, batch_size=batch_size, shuffle=False, num_workers=8)
 
-            # pass real images with generated images into mutual info function
-            MI_scores_per_class[c], most_similar, most_different = \
-                mutual_information(generated_images[i], class_dataloader, save_most_similar, save_most_different)
+            # pass real images with generated images into the image similarity function
+            sim_scores_per_class[c], most_similar, most_different = \
+                calc_img_similarity(generated_images[i], class_dataloader, save_most_similar, save_most_different)
 
             if save_most_similar:
                 top5_similar_images_per_class[c] = most_similar
@@ -240,10 +240,10 @@ if save_individual:
     else:
         pass
 
-# save histograms of the mutual information scores
-if calc_mutual_info:
+# save histograms of the similarity metric scores
+if calc_im_similarity:
     # make directory for storing metrics
-    os.makedirs(results_dir + save_dir + weights_path[:-4] + "/metrics/mutual_info_scores/", exist_ok=True)
+    os.makedirs(results_dir + save_dir + weights_path[:-4] + "/metrics/img_similarities/", exist_ok=True)
 
     def save_image(img_pairs, save_as):
         cols = ['Generated Images', 'Real Images']
@@ -263,27 +263,27 @@ if calc_mutual_info:
     if classes is not None:
         # save a single plot of histograms
         plt.figure(figsize=(15, 6))
-        MI_df = pd.DataFrame(dict([(k, pd.Series(v)) for k, v in MI_scores_per_class.items()]))
-        MI_df.describe().to_csv(results_dir+save_dir+weights_path[:-4]+"/metrics/mutual_info_scores/summary.csv")
+        MI_df = pd.DataFrame(dict([(k, pd.Series(v)) for k, v in sim_scores_per_class.items()]))
+        MI_df.describe().to_csv(results_dir+save_dir+weights_path[:-4]+"/metrics/img_similarities/summary.csv")
         MI_df = pd.melt(MI_df, value_vars=classes).dropna()
         # print(MI_df)
         sns.violinplot(data=MI_df, x="variable", y="value")
         plt.xlabel("Gene")
         plt.ylabel("MI score")
         plt.xticks(rotation=45)
-        plt.title("Distribution of Mutual Information Scores")
-        plt.savefig(results_dir + save_dir + weights_path[:-4] + "/metrics/mutual_info_scores/scores_hist.jpg")
+        plt.title("Distribution of Image Similarity Metric")
+        plt.savefig(results_dir + save_dir + weights_path[:-4] + "/metrics/img_similarities/scores_hist.jpg")
 
         # save histograms for each class
         for i, gene in enumerate(classes):
             plt.figure(figsize=(12, 6))
-            sns.histplot(MI_scores_per_class[gene])
-            plt.xlabel('Mutual Information (MI)')
-            plt.title('Distribution of Mutual Information Scores for Gene {}'.format(gene))
-            plt.savefig(results_dir + save_dir + weights_path[:-4] + "/metrics/mutual_info_scores/" + "MI_hist_{}.jpg".format(gene))
+            sns.histplot(sim_scores_per_class[gene])
+            plt.xlabel('Image Similarity Metric')
+            plt.title('Distribution of Image Similarity Scores for Gene {}'.format(gene))
+            plt.savefig(results_dir + save_dir + weights_path[:-4] + "/metrics/img_similarities/" + "MI_hist_{}.jpg".format(gene))
 
             if save_most_similar:
-                save_as = results_dir + save_dir + weights_path[:-4] + "/metrics/mutual_info_scores/" + \
+                save_as = results_dir + save_dir + weights_path[:-4] + "/metrics/img_similarities/" + \
                           "{}_5most_similar.jpg".format(gene)
                 save_image(top5_similar_images_per_class[gene], save_as)
 

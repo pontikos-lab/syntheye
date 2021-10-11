@@ -79,27 +79,6 @@ class ImageDataset(Dataset):
             self.img_dir = list(df[fpath_col_name])
             self.img_labels = None
 
-        # df = pd.read_csv(data_file)
-        # all_filepaths = list(df[fpath_col_name])
-        # all_labels = list(df[lbl_col_name]) if lbl_col_name is not None else None
-
-        # if all_labels is not None:
-        #     # if a list of specific classes is provided, only select those class examples for the dataset
-        #     if class_vals is not None:
-        #         idxs = []
-        #         for c in class_vals:
-        #             idxs += list(np.where(np.array(all_labels) == c)[0])
-        #         self.img_dir = [all_filepaths[i] for i in idxs]
-        #         self.img_labels = [all_labels[i] for i in idxs]
-        #     else:
-        #         self.img_dir = all_filepaths
-        #         self.img_labels = all_labels
-        # else:
-        #     self.img_dir = all_filepaths
-        #     self.img_labels = None
-
-        # read dataframe
-
         # relevant attributes if classes are provided
         self.classes = list(np.unique(self.img_labels)) if self.img_labels is not None else None
         self.n_classes = len(self.classes) if self.img_labels is not None else None
