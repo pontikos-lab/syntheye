@@ -16,10 +16,10 @@ output_im_resolution: 256
 
 # TRAINING SETTINGS
 epochs: 1000
-loss_fn: wgan-gp
-batch_size: 48
+loss_fn: RAHinge
+batch_size: 64
 n_disc_updates: 1
-gen_lr: 0.0003
+gen_lr: 0.003
 disc_lr: 0.003
 beta1: 0.0
 beta2: 0.99
@@ -30,7 +30,7 @@ save_checkpoint_steps: 50
 save_tensorboard: 1
 save_weights: 0
 parallel: 1
-device_ids: [0, 1, 2]
+device_ids: all
 
 # TESTING SETTINGS
 weights_dir: checkpoints/checkpoints/data:all_baf_valid_50deg_filtered3.csv_classes:classes.txt_trans:256-1-1_mod:cmsggan-512-256_tr:1000-RAHinge-48-1-0.003-0.003-0.0-0.99/
@@ -38,7 +38,7 @@ weights_path: model_ema_state_100.pth
 gen_classes: all # provide a list or text file of classes to generate
 n_test_samples: 100 # number of test samples per class
 evaluate:
-  mutual_information: 0
+  compute_similarity: 0
   fid_imagenet: 0
   fid_eye2gene: 0
   class_preds_eye2gene: 1
