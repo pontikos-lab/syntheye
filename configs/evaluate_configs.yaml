@@ -1,0 +1,21 @@
+# DATA
+real_data_file: datasets/all_baf_valid_50deg_filtered3.csv
+synthetic_data_file: results/data:all_baf_valid_50deg_filtered3.csv_classes:classes.txt_trans:256-1-1_mod:cmsggan-512-256_tr:1000-RAHinge-48-1-0.003-0.003-0.0-0.99/model_ema_state_100/generated_examples.csv
+filenames_col: file.path
+labels_col: gene
+classes: ["ABCA4", "USH2A"]
+transformations:
+  resize_dim: 512
+  grayscale: 1
+
+# EVALUATION SETTINGS
+similarity_check:
+  compute: 1
+  similarity_metric: "PCAWithCosine"
+  save_most_similar: 1
+  save_most_different: 1
+quality_check:
+  compute: 0
+  fid_imagenet: 0
+  fid_eye2gene: 0
+  class_preds_eye2gene: 0

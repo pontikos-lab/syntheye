@@ -15,7 +15,7 @@ import copy
 import numpy as np
 import torch as th
 from torch.utils.tensorboard import SummaryWriter
-from helpers.data_utils import show_tensor_images
+from utils.data_utils import show_tensor_images
 
 
 class Generator(th.nn.Module):
@@ -294,7 +294,7 @@ class MSG_GAN:
             self.gen_shadow.eval()
 
         if calc_fid:
-            from helpers.evaluate import compute_fid
+            from utils.evaluation_utils import compute_fid
             self.calc_fid = compute_fid
         else:
             self.calc_fid = None

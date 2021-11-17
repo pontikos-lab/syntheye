@@ -1,6 +1,6 @@
 import torch
 import numpy as np
-from helpers.data_utils import get_noise, get_one_hot_labels, combine_vectors
+from utils.data_utils import get_noise, get_one_hot_labels, combine_vectors
 
 
 def generate(latent_size,
@@ -78,7 +78,7 @@ def generate(latent_size,
             gen = torch.nn.DataParallel(gen)
 
             # create latent vector with class embeddings
-            noise_input = get_noise(n_samples, latent_size, device) # noise fixed across classes if generate_randomly = False
+            noise_input = get_noise(n_samples, latent_size, device)  # noise fixed across classes if generate_randomly = False
             class_idxs = torch.tensor([class_mapping[c] for c in classes])
             class_encodings = get_one_hot_labels(class_idxs, n_total_classes).to(device)
 

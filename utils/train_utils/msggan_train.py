@@ -4,12 +4,12 @@ Code adapted from -> https://github.com/akanimax/BMSG-GAN
 """
 
 # import modules
-import torch
-from helpers.data_utils import *
+from utils.data_utils import *
 from models.msggan import losses
+from models.acgan.losses import RelativisticAverageHingeGAN
 
 
-def train(model, data_loader, train_configs, **kwargs):
+def train(model, train_dataloader, test_dataloader, train_configs, **kwargs):
 
     # extract config values
     epochs = train_configs['epochs']
@@ -30,6 +30,10 @@ def train(model, data_loader, train_configs, **kwargs):
         loss = losses.HingeGAN
     elif loss_fn == "RAHinge":
         loss = losses.RelativisticAverageHingeGAN
+    elif loss_fn == "RAHingeCE":
+        loss = losses.RAHingeWithCrossEntropy
+    elif loss_fn == "BCEwithCE":
+        loss = losses.BCEwithCE
     elif loss_fn == "standard-gan":
         loss = losses.StandardGAN
     elif loss_fn == "lsgan":
@@ -63,8 +67,8 @@ def train(model, data_loader, train_configs, **kwargs):
         start = 1
 
     # train the gan
-    model.train(data_loader, gen_optim, disc_optim, n_disc_updates=n_disc_updates, loss_fn=loss(model.dis),
-                num_epochs=epochs, checkpoint_factor=checkpoint_factor, num_samples=n_samples,
+    model.train(train_dataloader, test_dataloader, gen_optim, disc_optim, n_disc_updates=n_disc_updates,
+                loss_fn=loss(model.dis), num_epochs=epochs, checkpoint_factor=checkpoint_factor, num_samples=n_samples,
                 display_step=display_step, save_dir="checkpoints/"+kwargs["checkpoints_fname"],
                 start=start, log_dir=train_configs['logfile'])
 

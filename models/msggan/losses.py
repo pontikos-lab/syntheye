@@ -2,7 +2,7 @@
 Code taken from -> https://github.com/akanimax/BMSG-GAN
 """
 
-import torch as th
+import torch
 
 
 # =============================================================
@@ -66,21 +66,57 @@ class StandardGAN(GANLoss):
 
         # calculate the real loss:
         real_loss = self.criterion(
-            th.squeeze(r_preds),
-            th.ones(real_samps.shape[0]).to(device))
+            torch.squeeze(r_preds),
+            torch.ones(real_samps.shape[0]).to(device))
 
         # calculate the fake loss:
         fake_loss = self.criterion(
-            th.squeeze(f_preds),
-            th.zeros(fake_samps.shape[0]).to(device))
+            torch.squeeze(f_preds),
+            torch.zeros(fake_samps.shape[0]).to(device))
 
         # return final losses
         return (real_loss + fake_loss) / 2
 
     def gen_loss(self, _, fake_samps, labels=None):
         preds, _, _ = self.dis(fake_samps)
-        return self.criterion(th.squeeze(preds),
-                              th.ones(fake_samps.shape[0]).to(fake_samps.device))
+        return self.criterion(torch.squeeze(preds), torch.ones(fake_samps.shape[0]).to(fake_samps.device))
+
+
+class BCEwithCE(GANLoss):
+
+    def __init__(self, dis):
+        from torch.nn import BCEWithLogitsLoss
+        from torch.nn import CrossEntropyLoss
+
+        super().__init__(dis)
+
+        # define the criterion and activation used for object
+        self.bce = BCEWithLogitsLoss()
+        self.ce = CrossEntropyLoss()
+
+    def dis_loss(self, real_samps, fake_samps, labels=None):
+
+        # predictions for real images and fake images separately :
+        r_preds, r_class_preds = self.dis(real_samps)
+        f_preds, f_class_preds = self.dis(fake_samps)
+
+        # calculate the real loss: r_preds shape = [n_samples]
+        real_bce_loss = self.bce(r_preds, torch.ones(r_preds.shape[0]).to(r_preds.device))
+        fake_bce_loss = self.bce(f_preds, torch.zeros(f_preds.shape[0]).to(f_preds.device))
+        total_bce_loss = (real_bce_loss + fake_bce_loss) / 2
+
+        # calculate cross entropy loss on the class predictions
+        real_ce_loss = self.ce(r_class_preds, labels)
+        fake_ce_loss = self.ce(f_class_preds, labels)
+        total_ce_loss = (real_ce_loss + fake_ce_loss) / 2
+
+        return total_bce_loss + total_ce_loss, total_ce_loss
+
+    def gen_loss(self, _, fake_samps, labels=None):
+        f_preds, f_class_preds = self.dis(fake_samps)
+        bce_loss = self.bce(f_preds, torch.ones(f_preds.shape[0]).to(f_preds.device))
+        ce_loss = self.ce(f_class_preds, labels)
+        return bce_loss + ce_loss
 
 
 class WGAN_GP(GANLoss):
@@ -107,7 +143,7 @@ class WGAN_GP(GANLoss):
 
         # generate random epsilon
         batch_size = real_samps[0].shape[0]
-        epsilon = th.rand((batch_size, 1, 1, 1)).to(fake_samps[0].device)
+        epsilon = torch.rand((batch_size, 1, 1, 1)).to(fake_samps[0].device)
 
         # create the merge of both real and fake samples
         if isinstance(real_samps, list):
@@ -119,8 +155,8 @@ class WGAN_GP(GANLoss):
         op = self.dis(merged, labels)
 
         # perform backward pass from op to merged for obtaining the gradients
-        gradient = th.autograd.grad(outputs=op, inputs=merged,
-                                    grad_outputs=th.ones_like(op), create_graph=True,
+        gradient = torch.autograd.grad(outputs=op, inputs=merged,
+                                    grad_outputs=torch.ones_like(op), create_graph=True,
                                     retain_graph=True, only_inputs=True)[0]
 
         # calculate the penalty using these gradients
@@ -135,8 +171,8 @@ class WGAN_GP(GANLoss):
         fake_out = self.dis(fake_samps, labels)
         real_out = self.dis(real_samps, labels)
 
-        loss = (th.mean(fake_out) - th.mean(real_out)
-                + (self.drift * th.mean(real_out ** 2)))
+        loss = (torch.mean(fake_out) - torch.mean(real_out)
+                + (self.drift * torch.mean(real_out ** 2)))
 
         if self.use_gp:
             # calculate the WGAN-GP (gradient penalty)
@@ -147,7 +183,7 @@ class WGAN_GP(GANLoss):
 
     def gen_loss(self, _, fake_samps, labels=None):
         # calculate the WGAN loss for generator
-        loss = -th.mean(self.dis(fake_samps, labels))
+        loss = -torch.mean(self.dis(fake_samps, labels))
 
         return loss
 
@@ -158,11 +194,11 @@ class LSGAN(GANLoss):
         super().__init__(dis)
 
     def dis_loss(self, real_samps, fake_samps, labels=None):
-        return 0.5 * (((th.mean(self.dis(real_samps)) - 1) ** 2)
-                      + (th.mean(self.dis(fake_samps))) ** 2)
+        return 0.5 * (((torch.mean(self.dis(real_samps)) - 1) ** 2)
+                      + (torch.mean(self.dis(fake_samps))) ** 2)
 
     def gen_loss(self, _, fake_samps, labels=None):
-        return 0.5 * ((th.mean(self.dis(fake_samps)) - 1) ** 2)
+        return 0.5 * ((torch.mean(self.dis(fake_samps)) - 1) ** 2)
 
 
 class LSGAN_SIGMOID(GANLoss):
@@ -172,13 +208,13 @@ class LSGAN_SIGMOID(GANLoss):
 
     def dis_loss(self, real_samps, fake_samps, labels=None):
         from torch.nn.functional import sigmoid
-        real_scores = th.mean(sigmoid(self.dis(real_samps)))
-        fake_scores = th.mean(sigmoid(self.dis(fake_samps)))
+        real_scores = torch.mean(sigmoid(self.dis(real_samps)))
+        fake_scores = torch.mean(sigmoid(self.dis(fake_samps)))
         return 0.5 * (((real_scores - 1) ** 2) + (fake_scores ** 2))
 
     def gen_loss(self, _, fake_samps, labels=None):
         from torch.nn.functional import sigmoid
-        scores = th.mean(sigmoid(self.dis(fake_samps)))
+        scores = torch.mean(sigmoid(self.dis(fake_samps)))
         return 0.5 * ((scores - 1) ** 2)
 
 
@@ -191,13 +227,13 @@ class HingeGAN(GANLoss):
         r_preds, r_mus, r_sigmas = self.dis(real_samps)
         f_preds, f_mus, f_sigmas = self.dis(fake_samps)
 
-        loss = (th.mean(th.nn.ReLU()(1 - r_preds)) +
-                th.mean(th.nn.ReLU()(1 + f_preds)))
+        loss = (torch.mean(torch.nn.ReLU()(1 - r_preds)) +
+                torch.mean(torch.nn.ReLU()(1 + f_preds)))
 
         return loss
 
     def gen_loss(self, _, fake_samps, labels=None):
-        return -th.mean(self.dis(fake_samps))
+        return -torch.mean(self.dis(fake_samps))
 
 
 class RelativisticAverageHingeGAN(GANLoss):
@@ -211,14 +247,13 @@ class RelativisticAverageHingeGAN(GANLoss):
         f_preds = self.dis(fake_samps, labels)
 
         # difference between real and fake:
-        r_f_diff = r_preds - th.mean(f_preds)
+        r_f_diff = r_preds - torch.mean(f_preds)
 
         # difference between fake and real samples
-        f_r_diff = f_preds - th.mean(r_preds)
+        f_r_diff = f_preds - torch.mean(r_preds)
 
         # return the loss
-        loss = (th.mean(th.nn.ReLU()(1 - r_f_diff))
-                + th.mean(th.nn.ReLU()(1 + f_r_diff)))
+        loss = (torch.mean(torch.nn.ReLU()(1 - r_f_diff)) + torch.mean(torch.nn.ReLU()(1 + f_r_diff)))
 
         return loss
 
@@ -228,10 +263,55 @@ class RelativisticAverageHingeGAN(GANLoss):
         f_preds = self.dis(fake_samps, labels)
 
         # difference between real and fake:
-        r_f_diff = r_preds - th.mean(f_preds)
+        r_f_diff = r_preds - torch.mean(f_preds)
 
         # difference between fake and real samples
-        f_r_diff = f_preds - th.mean(r_preds)
+        f_r_diff = f_preds - torch.mean(r_preds)
 
         # return the loss
-        return th.mean(th.nn.ReLU()(1 + r_f_diff)) + th.mean(th.nn.ReLU()(1 - f_r_diff))
+        return torch.mean(torch.nn.ReLU()(1 + r_f_diff)) + torch.mean(torch.nn.ReLU()(1 - f_r_diff))
+
+
+class RAHingeWithCrossEntropy(GANLoss):
+
+    def __init__(self, dis):
+        super().__init__(dis)
+
+    def dis_loss(self, real_samps, fake_samps, labels=None):
+
+        # Obtain predictions
+        r_preds, r_pred_classes = self.dis(real_samps)
+        f_preds, f_pred_classes = self.dis(fake_samps)
+
+        # difference between real and fake:
+        r_f_diff = r_preds - torch.mean(f_preds)
+
+        # difference between fake and real samples
+        f_r_diff = f_preds - torch.mean(r_preds)
+
+        # return the RAHinge loss
+        hinge_loss = torch.mean(torch.nn.ReLU()(1 - r_f_diff)) + torch.mean(torch.nn.ReLU()(1 + f_r_diff))
+
+        from torch.nn import CrossEntropyLoss
+        # return the cross entropy loss for classes
+        ce_loss = CrossEntropyLoss()(r_pred_classes, labels) + CrossEntropyLoss()(f_pred_classes, labels)
+
+        return hinge_loss + ce_loss, ce_loss
+
+    def gen_loss(self, real_samps, fake_samps, labels=None):
+        # Obtain predictions
+        r_preds, r_pred_classes = self.dis(real_samps, labels)
+        f_preds, f_pred_classes = self.dis(fake_samps, labels)
+
+        # difference between real and fake:
+        r_f_diff = r_preds - torch.mean(f_preds)
+
+        # difference between fake and real samples
+        f_r_diff = f_preds - torch.mean(r_preds)
+
+        from torch.nn import CrossEntropyLoss
+        # return the cross entropy loss for classes
+        ce_loss = CrossEntropyLoss()(r_pred_classes, labels) + CrossEntropyLoss()(f_pred_classes, labels)
+
+        # return the loss
+        return torch.mean(torch.nn.ReLU()(1 + r_f_diff)) + torch.mean(torch.nn.ReLU()(1 - f_r_diff)) + ce_loss

@@ -56,34 +56,75 @@ def get_noise(n_samples, z_dim, device='cpu'):
 
 class ImageDataset(Dataset):
     """ PyTorch class for Dataset """
-    def __init__(self, data_file, fpath_col_name, lbl_col_name=None, class_vals="all", transforms=None):
+    def __init__(self, data_file, fpath_col_name, lbl_col_name=None, class_vals="all", transforms=None, fold=None, class_mapping=None):
         # read dataframe
         df = pd.read_csv(data_file)
         if lbl_col_name is not None:
+
             if class_vals == "all":
-                self.img_dir = list(df[fpath_col_name])
-                self.img_labels = list(df[lbl_col_name])
+
+                if fold is None:
+                    self.img_dir = list(df[fpath_col_name])
+                    self.img_labels = list(df[lbl_col_name])
+                elif fold == "train":
+                    train_df = df.where(df.fold != -1).dropna()
+                    self.img_dir = list(train_df[fpath_col_name])
+                    self.img_labels = list(train_df[lbl_col_name])
+                elif fold == "test":
+                    test_df = df.where(df.fold == -1).dropna()
+                    self.img_dir = list(test_df[fpath_col_name])
+                    self.img_labels = list(test_df[lbl_col_name])
+                else:
+                    raise Exception("fold can be train or test only.")
+
             else:
+
                 # load selected classes
                 if type(class_vals) == str:
                     with open(class_vals, 'r') as f:
                         selected_classes = f.read().splitlines()
                 else:
                     selected_classes = class_vals
+
                 # get rows of dataframe for selected classes
                 df_subset = df.loc[df[lbl_col_name].isin(selected_classes)]
-                self.img_dir = list(df_subset[fpath_col_name])
-                self.img_labels = list(df_subset[lbl_col_name])
+                if fold is None:
+                    self.img_dir = list(df_subset[fpath_col_name])
+                    self.img_labels = list(df_subset[lbl_col_name])
+                elif fold == "train":
+                    train_df = df_subset.where(df_subset.fold != -1).dropna()
+                    self.img_dir = list(train_df[fpath_col_name])
+                    self.img_labels = list(train_df[lbl_col_name])
+                elif fold == "test":
+                    test_df = df_subset.where(df_subset.fold == -1).dropna()
+                    self.img_dir = list(test_df[fpath_col_name])
+                    self.img_labels = list(test_df[lbl_col_name])
+                else:
+                    raise Exception("fold can be train or test only.")
 
         else:
             self.img_dir = list(df[fpath_col_name])
             self.img_labels = None
 
-        # relevant attributes if classes are provided
-        self.classes = list(np.unique(self.img_labels)) if self.img_labels is not None else None
-        self.n_classes = len(self.classes) if self.img_labels is not None else None
-        self.idx2class = dict(zip(range(self.n_classes), self.classes)) if self.img_labels is not None else None
-        self.class2idx = dict(zip(self.classes, range(self.n_classes))) if self.img_labels is not None else None
+        # determine classes and mappings from dataset or from a provided dictionary json file
+        if (class_mapping is not None) and (self.img_labels is not None):
+            import json
+            with open(class_mapping, 'r') as f:
+                self.class2idx = json.load(f)
+            self.classes = list(self.class2idx.keys())
+            self.n_classes = len(self.classes)
+            self.idx2class = {v:k for (k,v) in self.class2idx.items()}
+        elif self.img_labels is not None:
+            # relevant attributes if classes are provided
+            self.classes = list(np.unique(self.img_labels))
+            self.n_classes = len(self.classes)
+            self.idx2class = dict(zip(range(self.n_classes), self.classes))
+            self.class2idx = dict(zip(self.classes, range(self.n_classes)))
+        else:
+            self.classes = None
+            self.n_classes = None
+            self.idx2class = None
+            self.class2idx = None
 
         # image transformations list
         self.transform = transforms
@@ -110,7 +151,7 @@ class ImageDataset(Dataset):
         if self.transform is not None:
             image = self.transform(image)
 
-        return image, label
+        return item, self.img_dir[item], image, label
 
 
 def weights_init(m):
