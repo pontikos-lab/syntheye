@@ -1,21 +1,34 @@
 # DATA
-real_data_file: datasets/all_baf_valid_50deg_filtered3.csv
-synthetic_data_file: results/data:all_baf_valid_50deg_filtered3.csv_classes:classes.txt_trans:256-1-1_mod:cmsggan-512-256_tr:1000-RAHinge-48-1-0.003-0.003-0.0-0.99/model_ema_state_100/generated_examples.csv
+real_data_file: datasets/syntheye/faf_dataset_cleaned.csv
+synthetic_data_file: results/data:faf_dataset_cleaned.csv_classes:classes.txt_trans:512-1-1_mod:cmsggan1-512-512_tr:1000-RAHinge-32-1-0.003-0.003-0.0-0.99/model_ema_state_106/generated_examples.csv
 filenames_col: file.path
 labels_col: gene
-classes: ["ABCA4", "USH2A"]
+classes: all
 transformations:
   resize_dim: 512
   grayscale: 1
 
 # EVALUATION SETTINGS
+save_dir: results/512_D_CMSGGAN/BRISQUE/
 similarity_check:
-  compute: 1
-  similarity_metric: "PCAWithCosine"
+  compute: 0
+  process_images:
+    alpha: 1.0
+    beta: 0.0
+    filtering:
+      kernel:
+      size:
+    thresholding:
+      function:
+      size:
+  similarity_metric: MSE
   save_most_similar: 1
   save_most_different: 1
 quality_check:
-  compute: 0
-  fid_imagenet: 0
-  fid_eye2gene: 0
-  class_preds_eye2gene: 0
+  compute: 1
+  quality_metric: BRISQUE
+
+#  fid_imagenet: 0
+#  fid_eye2gene: 0
+#  class_preds_eye2gene: 0
+#  save_as:

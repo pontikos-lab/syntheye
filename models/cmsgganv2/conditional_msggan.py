@@ -19,7 +19,7 @@ from utils.data_utils import show_tensor_images, get_one_hot_labels, combine_vec
 class Generator(th.nn.Module):
     """ Generator of the GAN network """
 
-    def __init__(self, depth=7, latent_size=512, mode="rgb", use_eql=True):
+    def __init__(self, depth=7, latent_size=512, n_classes=10, mode="rgb", use_eql=True):
         """
         constructor for the Generator class
         :param depth: required depth of the Network
@@ -27,8 +27,7 @@ class Generator(th.nn.Module):
         :param use_eql: whether to use equalized learning rate
         """
         from torch.nn import ModuleList, Conv2d
-        from models.msggan.custom_layers import GenGeneralConvBlock, \
-            GenInitialBlock, _equalized_conv2d
+        from models.cmsgganv2.custom_layers import MappingLayers, GenGeneralConvBlock, GenInitialBlock, _equalized_conv2d
 
         super().__init__()
 
@@ -38,6 +37,7 @@ class Generator(th.nn.Module):
             assert latent_size >= np.power(2, depth - 4), "latent size will diminish to zero"
 
         # state of the generator:
+        self.n_classes = n_classes
         self.use_eql = use_eql
         self.depth = depth
         self.latent_size = latent_size
@@ -59,34 +59,36 @@ class Generator(th.nn.Module):
                     return Conv2d(in_channels, 1, (1, 1), bias=True)
 
         # create a module list of the other required general convolution blocks
-        self.layers = ModuleList([GenInitialBlock(self.latent_size, use_eql=self.use_eql)])
+        self.mappinglayer = MappingLayers(z_dim=latent_size, hidden_dim=latent_size, w_dim=latent_size)
+        self.layers = ModuleList([GenInitialBlock(self.latent_size, self.n_classes, use_eql=self.use_eql)])
         self.rgb_converters = ModuleList([to_rgb(self.latent_size)])
 
         # create the remaining layers
         for i in range(self.depth - 1):
             if i <= 2:
-                layer = GenGeneralConvBlock(self.latent_size, self.latent_size,
-                                            use_eql=self.use_eql)
+                layer = GenGeneralConvBlock(self.latent_size, self.latent_size, use_eql=self.use_eql)
                 rgb = to_rgb(self.latent_size)
             else:
-                layer = GenGeneralConvBlock(
-                    int(self.latent_size // np.power(2, i - 3)),
-                    int(self.latent_size // np.power(2, i - 2)),
-                    use_eql=self.use_eql
-                )
+                layer = GenGeneralConvBlock(int(self.latent_size // np.power(2, i - 3)),
+                                            int(self.latent_size // np.power(2, i - 2)),
+                                            use_eql=self.use_eql)
                 rgb = to_rgb(int(self.latent_size // np.power(2, i - 2)))
             self.layers.append(layer)
             self.rgb_converters.append(rgb)
 
-    def forward(self, x, *args, **kwargs):
+    def forward(self, noise, labels, *args, **kwargs):
         """
         forward pass of the Generator
         :param x: input noise
         :return: *y => output of the generator at various scales
         """
-        outputs = []  # initialize to empty list
 
-        y = x  # start the computational pipeline
+        # start computational pipeline
+        y = self.mappinglayer(noise)
+        y = combine_vectors(y, labels)
+
+        # initialize to empty list
+        outputs = []
         for block, converter in zip(self.layers, self.rgb_converters):
             y = block(y)
             outputs.append(converter(y))
@@ -103,8 +105,7 @@ class Generator(th.nn.Module):
         :return: img => colour range adjusted images
         """
         if drange_in != drange_out:
-            scale = (np.float32(drange_out[1]) - np.float32(drange_out[0])) / (
-                    np.float32(drange_in[1]) - np.float32(drange_in[0]))
+            scale = (np.float32(drange_out[1]) - np.float32(drange_out[0])) / (np.float32(drange_in[1]) - np.float32(drange_in[0]))
             bias = (np.float32(drange_out[0]) - np.float32(drange_in[0]) * scale)
             data = data * scale + bias
         return th.clamp(data, min=0, max=1)
@@ -127,7 +128,7 @@ class Discriminator(th.nn.Module):
                                 So, it is not parallelized.
         """
         from torch.nn import ModuleList
-        from models.msggan.custom_layers import DisGeneralConvBlock, \
+        from models.cmsgganv2.custom_layers import DisGeneralConvBlock, \
             DisFinalBlock, _equalized_conv2d
         from torch.nn import Conv2d
 
@@ -245,7 +246,7 @@ class MSG_GAN:
                  device=th.device("cpu"), device_ids=None, calc_fid=False):
         """ constructor for the class """
 
-        self.gen = Generator(depth, latent_size+n_classes, mode=mode, use_eql=use_eql).to(device)
+        self.gen = Generator(depth, latent_size, n_classes=n_classes, mode=mode, use_eql=use_eql).to(device)
         self.dis = Discriminator(depth, latent_size, n_classes=n_classes, mode=mode, use_eql=True).to(device)
         self.mode = mode
         if device_ids is not None:
@@ -267,7 +268,7 @@ class MSG_GAN:
         self.device = device
 
         if self.use_ema:
-            from models.msggan.custom_layers import update_average
+            from models.cmsgganv2.custom_layers import update_average
 
             # create a shadow copy of the generator
             self.gen_shadow = copy.deepcopy(self.gen)
@@ -291,21 +292,6 @@ class MSG_GAN:
         else:
             self.calc_fid = None
 
-    def generate_samples(self, num_samples):
-        """
-        generate samples using this gan
-        :param num_samples: number of samples to be generated
-        :return: generated samples tensor: list[ Tensor(B x H x W x C)]
-        """
-        noise = th.randn(num_samples, self.latent_size).to(self.device)
-        generated_images = self.gen(noise)
-
-        # reshape the generated images
-        generated_images = list(map(lambda x: (x.detach().permute(0, 2, 3, 1) / 2) + 0.5,
-                                    generated_images))
-
-        return generated_images
-
     def optimize_discriminator(self, dis_optim, noise, class_encoding, real_batch, loss_fn, n_updates, normalize_latents):
         """
         performs one step of weight update on discriminator using the batch of data
@@ -319,16 +305,12 @@ class MSG_GAN:
         mean_iter_dis_loss = 0
         for _ in range(n_updates):
 
-            # combine noise and class encodings
-            noise_and_labels = combine_vectors(noise, class_encoding)
-
             if normalize_latents:
-                noise_and_labels = (noise_and_labels / noise_and_labels.norm(dim=-1, keepdim=True)
-                                    * ((self.latent_size+self.n_classes) ** 0.5))
+                noise = (noise / noise.norm(dim=-1, keepdim=True) * (self.latent_size ** 0.5))
 
             # generate a batch of samples
-            fake_samples = self.gen(noise_and_labels)
-            fake_samples = list(map(lambda x: x.detach(), fake_samples))
+            fake_samples = self.gen(noise, class_encoding)
+            fake_samples = list(map(lambda x: x.detach(), fake_samples)) # locks the generator and only optimizes discriminator
 
             # combine fake image samples with image one-hot encodings
             image_one_hot_labels = class_encoding[:, :, None, None]
@@ -358,15 +340,11 @@ class MSG_GAN:
         :return: current loss
         """
 
-        # combine noise and class encodings
-        noise_and_labels = combine_vectors(noise, class_encoding)
-
         if normalize_latents:
-            noise_and_labels = (noise_and_labels / noise_and_labels.norm(dim=-1, keepdim=True)
-                                * ((self.latent_size + self.n_classes) ** 0.5))
+            noise = noise / noise.norm(dim=-1, keepdim=True) * (self.latent_size ** 0.5)
 
         # generate a batch of samples
-        fake_samples = self.gen(noise_and_labels)
+        fake_samples = self.gen(noise, class_encoding)
 
         # combine fake image samples with image one-hot encodings
         image_one_hot_labels = class_encoding[:, :, None, None]
@@ -386,26 +364,6 @@ class MSG_GAN:
             self.ema_updater(self.gen_shadow, self.gen, self.ema_decay)
 
         return loss.item(), fake_samples
-
-    def create_grid(self, images, n_samples_visualize):
-        """
-        utility function to create a grid of GAN samples
-        :param samples: generated samples for storing list[Tensors]
-        :param img_files: list of names of files to write
-        :return: None (saves multiple files)
-        """
-        from torch.nn.functional import interpolate
-        from numpy import power
-
-        # resize the samples to have same resolution:
-        for i in range(len(images)):
-            images[i] = interpolate(images[i][:n_samples_visualize], scale_factor=power(2, self.depth - 1 - i))
-
-        # reshape into grid format
-        images_tensor = th.cat(images, 0)
-        images_grid = show_tensor_images(images_tensor, normalize=False, n_rows=n_samples_visualize)
-
-        return images_grid
 
     def train(self, train_dataloader, test_dataloader, gen_optim, dis_optim, loss_fn, n_disc_updates=5, normalize_latents=True,
               start=1, num_epochs=12, checkpoint_factor=1, num_samples=36, display_step=None,
@@ -507,16 +465,13 @@ class MSG_GAN:
                 fixed_latents = th.randn(len(batch[2]), self.latent_size).to(self.device)
                 fixed_class_names = [test_dataloader.dataset.idx2class[idx.item()] for idx in batch[3]]
                 fixed_class_encodings = get_one_hot_labels(batch[3].to(self.device), self.n_classes)
-                fixed_input = combine_vectors(fixed_latents, fixed_class_encodings)
 
                 if normalize_latents:
-                    fixed_input = (fixed_input
-                                   / fixed_input.norm(dim=-1, keepdim=True)
-                                   * (self.latent_size ** 0.5))
+                    fixed_latents = (fixed_latents / fixed_latents.norm(dim=-1, keepdim=True) * (self.latent_size ** 0.5))
 
                 # generate images from fixed latent input and adjust intensity values
                 with th.no_grad():
-                    test_samples = self.gen(fixed_input) if not self.use_ema else self.gen_shadow(fixed_input)
+                    test_samples = self.gen(fixed_latents, fixed_class_encodings) if not self.use_ema else self.gen_shadow(fixed_latents, fixed_class_encodings)
                     test_samples = [Generator.adjust_dynamic_range(sample) for sample in test_samples]
 
                 # calculate fid between generated batch and real batch

@@ -3,7 +3,7 @@ Code taken from -> https://github.com/akanimax/BMSG-GAN
 """
 
 import torch
-from torch.nn import functional as F
+
 
 # =============================================================
 # Interface for the losses
@@ -41,18 +41,16 @@ class GANLoss:
 # =============================================================
 # Normal versions of the Losses:
 # =============================================================
-# criterion = nn.L1Loss()
-def r1loss(inputs, label=None):
-    # non-saturating loss with R1 regularization
-    l = -1 if label else 1
-    return F.softplus(l*inputs).mean()
 
-class NSGANLoss(GANLoss):
+class StandardGAN(GANLoss):
 
     def __init__(self, dis):
         from torch.nn import BCEWithLogitsLoss
 
         super().__init__(dis)
+
+        # define the criterion and activation used for object
+        self.criterion = BCEWithLogitsLoss()
 
     def dis_loss(self, real_samps, fake_samps, labels=None):
         # small assertion:
@@ -61,29 +59,28 @@ class NSGANLoss(GANLoss):
 
         # device for computations:
         device = fake_samps.device
-        real_samps.requires_grad = True
 
         # predictions for real images and fake images separately :
-        real_preds = self.dis(real_samps)
-        real_loss = F.softplus(-1*real_preds).mean()
+        r_preds = self.dis(real_samps)
+        f_preds = self.dis(fake_samps)
 
-        from torch.autograd import grad
-        grad_real = grad(outputs=real_preds.sum(), inputs=real_samps, create_graph=True)[0]
-        grad_penalty = (grad_real.view(grad_real.size(0), -1).norm(2, dim=1) ** 2).mean()
-        grad_penalty = 0.5*10*grad_penalty
-        real_loss += grad_penalty
+        # calculate the real loss:
+        real_loss = self.criterion(
+            torch.squeeze(r_preds),
+            torch.ones(real_samps.shape[0]).to(device))
 
-        # calculate the fake loss
-        fake_preds = self.dis(fake_samps)
-        fake_loss = F.softplus(fake_preds).mean()
+        # calculate the fake loss:
+        fake_loss = self.criterion(
+            torch.squeeze(f_preds),
+            torch.zeros(fake_samps.shape[0]).to(device))
 
         # return final losses
         return (real_loss + fake_loss) / 2
 
     def gen_loss(self, _, fake_samps, labels=None):
-        preds = self.dis(fake_samps)
-        loss = F.softplus(-1*preds).mean()
-        return loss
+        preds, _, _ = self.dis(fake_samps)
+        return self.criterion(torch.squeeze(preds), torch.ones(fake_samps.shape[0]).to(fake_samps.device))
+
 
 class BCEwithCE(GANLoss):
 

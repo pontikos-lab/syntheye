@@ -1,34 +1,36 @@
 # DATA SETTINGS
-data_file: datasets/faf_dataset_cleaned.csv
+train_data_file: datasets/eye2gene/all_baf_valid_50deg_filtered_train_0.csv
+test_data_file: datasets/eye2gene/all_baf_valid_50deg_filtered_val_0_edited.csv
 filenames_col: file.path
 labels_col: gene
 train_classes: classes.txt
-class_mapping: class_mapping.json
+class_mapping: classes_mapping.json
 transformations:
-  resize_dim: 512
+  crop:
+  resize_dim: 256
   random_flip: 1
   grayscale: 1
   normalize: 1
 
 # GAN I/O SETTINGS
-model: cmsggan1
+model: stylegan2
 z_dim: 512
-output_im_resolution: 512
+output_im_resolution: 256
 
 # TRAINING SETTINGS
 epochs: 1000
-loss_fn: RAHinge
-batch_size: 32
+loss_fn: nsgan
+batch_size: 21
 n_disc_updates: 1
 gen_lr: 0.003
 disc_lr: 0.003
 beta1: 0.0
 beta2: 0.99
 display_step: 300
-calc_fid: 1
+calc_fid: 0
 n_samples_to_generate: 9
 save_checkpoint_steps: 50
 save_tensorboard: 1
-save_weights: 0
 parallel: 1
-device_ids: all
+device_ids: [1, 2, 3]
+save_weights_as: "stylegan2_512"

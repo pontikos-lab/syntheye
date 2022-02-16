@@ -67,9 +67,13 @@ class ImageDataset(Dataset):
                     self.img_dir = list(df[fpath_col_name])
                     self.img_labels = list(df[lbl_col_name])
                 elif fold == "train":
-                    train_df = df.where(df.fold != -1).dropna()
+                    train_df = df.where(df.fold.isin([1, 2, 3, 4])).dropna()
                     self.img_dir = list(train_df[fpath_col_name])
                     self.img_labels = list(train_df[lbl_col_name])
+                elif fold == "val":
+                    val_df = df.where(df.fold == 0).dropna()
+                    self.img_dir = list(val_df[fpath_col_name])
+                    self.img_labels = list(val_df[lbl_col_name])
                 elif fold == "test":
                     test_df = df.where(df.fold == -1).dropna()
                     self.img_dir = list(test_df[fpath_col_name])
@@ -92,9 +96,13 @@ class ImageDataset(Dataset):
                     self.img_dir = list(df_subset[fpath_col_name])
                     self.img_labels = list(df_subset[lbl_col_name])
                 elif fold == "train":
-                    train_df = df_subset.where(df_subset.fold != -1).dropna()
+                    train_df = df_subset.where(df_subset.fold.isin([1, 2, 3, 4])).dropna()
                     self.img_dir = list(train_df[fpath_col_name])
                     self.img_labels = list(train_df[lbl_col_name])
+                elif fold == "val":
+                    val_df = df_subset.where(df_subset.fold == 0).dropna()
+                    self.img_dir = list(val_df[fpath_col_name])
+                    self.img_labels = list(val_df[lbl_col_name])
                 elif fold == "test":
                     test_df = df_subset.where(df_subset.fold == -1).dropna()
                     self.img_dir = list(test_df[fpath_col_name])
@@ -103,7 +111,16 @@ class ImageDataset(Dataset):
                     raise Exception("fold can be train or test only.")
 
         else:
-            self.img_dir = list(df[fpath_col_name])
+            if fold is None:
+                self.img_dir = list(df[fpath_col_name])
+            elif fold == "train":
+                train_df = df.where(df.fold != -1).dropna()
+                self.img_dir = list(train_df[fpath_col_name])
+            elif fold == "test":
+                test_df = df.where(df.fold == -1).dropna()
+                self.img_dir = list(test_df[fpath_col_name])
+            else:
+                raise Exception("fold can be train or test only.")
             self.img_labels = None
 
         # determine classes and mappings from dataset or from a provided dictionary json file

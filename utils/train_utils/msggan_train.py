@@ -36,6 +36,8 @@ def train(model, train_dataloader, test_dataloader, train_configs, **kwargs):
         loss = losses.BCEwithCE
     elif loss_fn == "standard-gan":
         loss = losses.StandardGAN
+    elif loss_fn == "nsgan":
+        loss = losses.NSGANLoss
     elif loss_fn == "lsgan":
         loss = losses.LSGAN
     elif loss_fn == "lsgan-sigmoid":
@@ -69,7 +71,7 @@ def train(model, train_dataloader, test_dataloader, train_configs, **kwargs):
     # train the gan
     model.train(train_dataloader, test_dataloader, gen_optim, disc_optim, n_disc_updates=n_disc_updates,
                 loss_fn=loss(model.dis), num_epochs=epochs, checkpoint_factor=checkpoint_factor, num_samples=n_samples,
-                display_step=display_step, save_dir="checkpoints/"+kwargs["checkpoints_fname"],
+                display_step=display_step, save_dir=os.path.join("checkpoints/", kwargs["checkpoints_fname"]),
                 start=start, log_dir=train_configs['logfile'])
 
     return model

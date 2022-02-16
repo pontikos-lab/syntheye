@@ -2,8 +2,11 @@
 model_name: cmsggan1
 z_dim: 512
 output_im_resolution: 512
-weights_dir: checkpoints/data:all_baf_valid_50deg_filtered3.csv_classes:classes.txt_trans:512-1-1_mod:cmsggan1-512-512_tr:1000-RAHinge-32-1-0.003-0.003-0.0-0.99
-weights_path: model_ema_state_150.pth
-classes: ["ABCA4", "USH2A"] # provide a list or text file of classes to generate
-class_mapping: class_mapping.json
-n_samples: 50
+generate_randomly: 
+weights_dir: checkpoints/cmsggan512_ird_fold1234_experiment2
+weights_path: model_ema_state_100.pth
+classes: classes.txt # provide a list or text file of classes to generate
+class_mapping: classes_mapping.json
+n_samples: -1
+real_data_path: datasets/eye2gene/all_baf_valid_50deg_filtered_train_0.csv
+save_as: CMSGGAN512_rebalanced_dataset/

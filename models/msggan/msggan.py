@@ -246,22 +246,15 @@ class MSG_GAN:
                  use_eql=True, use_ema=True, ema_decay=0.999,
                  device=th.device("cpu"), device_ids=None, calc_fid=False):
         """ constructor for the class """
-        from torch.nn import DataParallel
 
         self.gen = Generator(depth, latent_size, mode=mode, use_eql=use_eql).to(device)
-
-        # Parallelize them if required:
-        # if device == th.device("cuda"):
-        #     self.gen = DataParallel(self.gen)
-        #     self.dis = Discriminator(depth, latent_size, mode=mode,
-        #                              use_eql=use_eql, gpu_parallelize=True).to(device)
-        # else:
-        #     self.dis = Discriminator(depth, latent_size, mode=mode, use_eql=True).to(device)
+        self.dis = Discriminator(depth, latent_size, mode=mode, use_eql=True).to(device)
+        self.mode = mode
         if device_ids is not None:
             from torch.nn import DataParallel
             if device_ids == "all":
-                self.gen = DataParallel(self.gen, device_ids=th.cuda.device_count())
-                self.dis = DataParallel(self.dis, device_ids=th.cuda.device_count())
+                self.gen = DataParallel(self.gen, device_ids=list(range(th.cuda.device_count())))
+                self.dis = DataParallel(self.dis, device_ids=list(range(th.cuda.device_count())))
             else:
                 self.gen = DataParallel(self.gen, device_ids=device_ids)
                 self.dis = DataParallel(self.dis, device_ids=device_ids)
@@ -294,8 +287,8 @@ class MSG_GAN:
             self.gen_shadow.eval()
 
         if calc_fid:
-            from utils.evaluation_utils import compute_fid
-            self.calc_fid = compute_fid
+            from utils.evaluation_utils import compute_fid_parallel
+            self.calc_fid = compute_fid_parallel
         else:
             self.calc_fid = None
 
@@ -368,36 +361,29 @@ class MSG_GAN:
 
         return loss.item(), fake_samples
 
-    def create_grid(self, samples, img_files=None):
+    def create_grid(self, images, n_samples_visualize):
         """
         utility function to create a grid of GAN samples
         :param samples: generated samples for storing list[Tensors]
         :param img_files: list of names of files to write
         :return: None (saves multiple files)
         """
-        from torchvision.utils import save_image
         from torch.nn.functional import interpolate
-        from numpy import sqrt, power
-
-        # dynamically adjust the colour of the images
-        samples = [Generator.adjust_dynamic_range(sample) for sample in samples]
+        from numpy import power
 
         # resize the samples to have same resolution:
-        for i in range(len(samples)):
-            samples[i] = interpolate(samples[i], scale_factor=power(2, self.depth - 1 - i))
+        for i in range(len(images)):
+            images[i] = interpolate(images[i][:n_samples_visualize], scale_factor=power(2, self.depth - 1 - i))
 
-        # save the images:
-        # for sample, img_file in zip(samples, img_files):
-        #     save_image(sample, img_file, nrow=int(sqrt(sample.shape[0])),
-        #                normalize=True, scale_each=True, padding=0)
+        # reshape into grid format
+        images_tensor = th.cat(images, 0)
+        images_grid = show_tensor_images(images_tensor, normalize=False, n_rows=n_samples_visualize)
 
-        return samples
+        return images_grid
 
-    def train(self, data_loader, gen_optim, dis_optim, loss_fn, n_disc_updates=5, normalize_latents=True,
-              start=1, num_epochs=12, feedback_factor=10, checkpoint_factor=1,
-              data_percentage=100, num_samples=36, display_step=None,
-              log_dir=None, sample_dir="./samples",
-              save_dir="./models", global_step=None):
+    def train(self, train_data_loader, test_data_loader, gen_optim, dis_optim, loss_fn, n_disc_updates=5, normalize_latents=True,
+              start=1, num_epochs=12, checkpoint_factor=1, num_samples=36, display_step=None,
+              log_dir=None, save_dir="./models", global_step=None, epsilon=3.0, tolerance=10):
 
         """
         Method for training the network
@@ -433,23 +419,14 @@ class MSG_GAN:
         assert isinstance(dis_optim, th.optim.Optimizer), \
             "dis_optim is not an Optimizer"
 
-        # create fixed_input for debugging
-        fixed_input = th.randn(num_samples, self.latent_size).to(self.device)
-        if normalize_latents:
-            fixed_input = (fixed_input
-                           / fixed_input.norm(dim=-1, keepdim=True)
-                           * (self.latent_size ** 0.5))
-
-        # create a global time counter
-        global_time = time.time()
-        global_step = 0
-
-        # store generator and discriminator losses
-        generator_losses = []
-        discriminator_losses = []
+        if self.calc_fid:
+            fid_prev, fid_next = 0, 0
+            k = 0
+        else:
+            fid_prev, fid_next, k = None, None, None
 
         # tensorboard - to visualize logs during training
-        writer = SummaryWriter()
+        writer = SummaryWriter(log_dir=log_dir)
 
         for epoch in range(start, num_epochs + 1):
             start_time = timeit.default_timer()  # record time at the start of epoch
@@ -460,15 +437,18 @@ class MSG_GAN:
             mean_generator_loss = 0
             mean_discriminator_loss = 0
 
-            for (i, batch) in tqdm(enumerate(data_loader, 1)):
+            # ==============================
+            # Train on minibatches
+            # ==============================
+
+            for (i, batch) in tqdm(enumerate(train_data_loader, 1)):
 
                 # extract current batch of data for training
-                images = batch[0].to(self.device)
+                images = batch[2].to(self.device)
                 extracted_batch_size = images.shape[0]
 
                 # create a list of downsampled images from the real images:
-                images = [images] + [avg_pool2d(images, int(np.power(2, i)))
-                                     for i in range(1, self.depth)]
+                images = [images] + [avg_pool2d(images, int(np.power(2, i))) for i in range(1, self.depth)]
                 images = list(reversed(images))
 
                 # sample some random latent points
@@ -485,116 +465,94 @@ class MSG_GAN:
                                                        images, loss_fn, n_updates=n_disc_updates)
 
                 # optimize the generator:
-                gen_loss, fake_samples = self.optimize_generator(gen_optim, gan_input,
-                                                                  images, loss_fn)
+                gen_loss, fake_samples = self.optimize_generator(gen_optim, gan_input, images, loss_fn)
 
                 # compute average gen and disc loss (weighted by batch_size)
-                mean_generator_loss += gen_loss * (len(batch)/len(data_loader.dataset))
-                mean_discriminator_loss +=  dis_loss * (len(batch)/len(data_loader.dataset))
-
-                # provide a loss feedback
-                # if i % (int(limit / feedback_factor) + 1) == 0 or i == 1:
-                    # elapsed = time.time() - global_time
-                    # elapsed = str(datetime.timedelta(seconds=elapsed))
-                    # print("Elapsed [%s] batch: %d  d_loss: %f  g_loss: %f"
-                          # % (elapsed, i, dis_loss, gen_loss))
-
-                    # also write the losses to the log file:
-                    # if log_dir is not None:
-                    #     log_file = os.path.join(log_dir, "loss.log")
-                    #     os.makedirs(os.path.dirname(log_file), exist_ok=True)
-                    #     with open(log_file, "a") as log:
-                    #         log.write(str(global_step) + "\t" + str(dis_loss) +
-                    #                   "\t" + str(gen_loss) + "\n")
-
-                    # visualize the losses on tensorboard
-                    # writer.add_scalars("Loss", {'Generator': gen_loss,
-                                                # 'Discriminator': dis_loss}, i)
-
-                    # create a grid of samples and save it
-                    # reses = [str(int(np.power(2, dep))) + "_x_" + str(int(np.power(2, dep)))
-                    #          for dep in range(2, self.depth + 2)]
-                    # gen_img_files = [os.path.join(sample_dir, res, "gen_" + str(epoch) + "_" + str(i) + ".png")
-                    #                  for res in reses]
-                    # gen_img_files = None
-
-                    # Make sure all the required directories exist
-                    # otherwise make them
-                    # os.makedirs(sample_dir, exist_ok=True)
-                    # for gen_img_file in gen_img_files:
-                    #     os.makedirs(os.path.dirname(gen_img_file), exist_ok=True)
-
-                    # dis_optim.zero_grad()
-                    # gen_optim.zero_grad()
-                    #
-                    # with th.no_grad():
-                    #     samples = self.create_grid(self.gen(fixed_input) if not self.use_ema
-                    #                                else self.gen_shadow(fixed_input), gen_img_files)
-
-                if global_step % display_step == 0 and global_step > 0:
-                    with th.no_grad():
-                        samples = self.create_grid(self.gen(fixed_input) if not self.use_ema
-                                                   else self.gen_shadow(fixed_input))
-
-                    # combine all images into a single tensor
-                    fake_images_tensor = th.cat(samples, 0) #samples[-1]
-                    # rescale real images to have same size
-                    real_images_tensor = [th.nn.functional.interpolate(im, scale_factor=2**(self.depth - 1 - i))
-                                          for i, im in enumerate(images)]
-                    real_images_tensor = th.cat(real_images_tensor, 0)
-                    fake_grid = show_tensor_images(fake_images_tensor, normalize=False, n_rows=len(samples[0]))
-                    real_grid = show_tensor_images(real_images_tensor, normalize=True, n_rows=len(images[0]))
-                    # visualize the images on tensorboard
-                    # writer.add_image("Reals", real_grid, global_step, dataformats='CHW')
-                    writer.add_image("Generator output", fake_grid, global_step, dataformats='CHW')
-
-                    if self.calc_fid is not None:
-                        fid = self.calc_fid(fake_samples[-1].squeeze(), images[-1].squeeze(), device=self.device)
-                        writer.add_scalar("Frechet Inception Distance", fid, global_step)
-
-                # increment the global_step:
-                global_step += 1
+                mean_generator_loss += gen_loss * (len(batch)/len(train_data_loader.dataset))
+                mean_discriminator_loss +=  dis_loss * (len(batch)/len(train_data_loader.dataset))
 
             # save to tensorboard
-            writer.add_scalars("Loss", {'Generator': mean_generator_loss,
-                                        'Discriminator': mean_discriminator_loss}, epoch)
+            writer.add_scalars("Loss", {"Generator": mean_generator_loss,
+                                        "Discriminator": mean_discriminator_loss}, epoch)
 
-            # store mean_losses into lists
-            generator_losses.append(mean_generator_loss)
-            discriminator_losses.append(mean_discriminator_loss)
+            # ==============================
+            # Evaluate per epoch
+            # ==============================
+            if self.calc_fid is not None:
+                fid_vals = []
+
+            for (i, batch) in tqdm(enumerate(test_data_loader)):
+                fixed_latents = th.randn(len(batch[2]), self.latent_size).to(self.device)
+
+                if normalize_latents:
+                    fixed_latents = (fixed_latents
+                                   / fixed_latents.norm(dim=-1, keepdim=True)
+                                   * (self.latent_size ** 0.5))
+
+                # generate images from fixed latent input and adjust intensity values
+                with th.no_grad():
+                    test_samples = self.gen(fixed_latents) if not self.use_ema else self.gen_shadow(fixed_latents)
+                    test_samples = [Generator.adjust_dynamic_range(sample) for sample in test_samples]
+
+                # calculate fid between generated batch and real batch
+                if self.calc_fid is not None:
+                    fid = self.calc_fid(test_samples[-1], batch[2], mode=self.mode, device=self.device)
+                    fid_vals.append(fid)
+
+            # compute mean FID metric and save to logs
+            fid_next = np.mean(np.array(fid_vals))
+            writer.add_scalar("Frechet Inception Distance", fid_next, epoch)
+
+            # check for early-stopping crtieria
+            if np.abs(fid_next - fid_prev) <= epsilon and k < tolerance:
+                k += 1
+            if np.abs(fid_next - fid_prev) <= epsilon and k == tolerance:
+                print("Minimal change in FID. Training completed early.")
+                os.makedirs(save_dir, exist_ok=True)
+                model_state_dict = {"epoch": epoch,
+                                    "i": global_step,
+                                    "gen_state_dict": self.gen.state_dict(),
+                                    "disc_state_dict": self.dis.state_dict(),
+                                    "gen_optim_state_dict": gen_optim.state_dict(),
+                                    "disc_optim_state_dict": dis_optim.state_dict()}
+                th.save(model_state_dict, save_dir + "/model_state_" + str(epoch))
+                if self.use_ema:
+                    gen_shadow_save_file = os.path.join(save_dir, "model_ema_state_" + str(epoch) + ".pth")
+                    th.save(self.gen_shadow.state_dict(), gen_shadow_save_file)
+                break
+            if np.abs(fid_next - fid_prev) > epsilon and k >= 1:
+                k = 0
+
+            # update fid_next value
+            fid_prev = fid_next
+
+            # =====================================================
+            # create a grid of visualizations for just a few images
+            # =====================================================
+            test_samples_grid = torchvision.utils.make_grid(test_samples[-1][:num_samples], normalize=False, nrow=3)
+
+            # visualize the images on tensorboard
+            writer.add_image("Synthetic Images", test_samples_grid, epoch, dataformats='CHW')
 
             # calculate the time required for the epoch
             stop_time = timeit.default_timer()
             print("Time taken for epoch: %.3f secs" % (stop_time - start_time))
 
-            if checkpoint_factor != 0:
-                if epoch % checkpoint_factor == 0:
-                    os.makedirs(save_dir, exist_ok=True)
+            if epoch % checkpoint_factor == 0 and epoch > 0:
+                os.makedirs(save_dir, exist_ok=True)
 
-                    model_state_dict = {"epoch": epoch,
-                                        "i": global_step,
-                                        "gen_state_dict": self.gen.state_dict(),
-                                        "disc_state_dict": self.dis.state_dict(),
-                                        "gen_optim_state_dict": gen_optim.state_dict(),
-                                        "disc_optim_state_dict": dis_optim.state_dict()}
+                model_state_dict = {"epoch": epoch,
+                                    "i": global_step,
+                                    "gen_state_dict": self.gen.state_dict(),
+                                    "disc_state_dict": self.dis.state_dict(),
+                                    "gen_optim_state_dict": gen_optim.state_dict(),
+                                    "disc_optim_state_dict": dis_optim.state_dict()}
 
-                    # gen_save_file = os.path.join(save_dir, "GAN_GEN_" + str(epoch) + ".pth")
-                    # dis_save_file = os.path.join(save_dir, "GAN_DIS_" + str(epoch) + ".pth")
-                    # gen_optim_save_file = os.path.join(save_dir,
-                    #                                    "GAN_GEN_OPTIM_" + str(epoch) + ".pth")
-                    # dis_optim_save_file = os.path.join(save_dir,
-                    #                                    "GAN_DIS_OPTIM_" + str(epoch) + ".pth")
+                th.save(model_state_dict, save_dir + "/model_state_" + str(epoch))
 
-                    # th.save(self.gen.state_dict(), gen_save_file)
-                    # th.save(self.dis.state_dict(), dis_save_file)
-                    # th.save(gen_optim.state_dict(), gen_optim_save_file)
-                    # th.save(dis_optim.state_dict(), dis_optim_save_file)
-
-                    th.save(model_state_dict, save_dir+"/model_state_"+str(epoch))
-
-                    if self.use_ema:
-                        gen_shadow_save_file = os.path.join(save_dir, "model_ema_state_" + str(epoch) + ".pth")
-                        th.save(self.gen_shadow.state_dict(), gen_shadow_save_file)
+                if self.use_ema:
+                    gen_shadow_save_file = os.path.join(save_dir, "model_ema_state_" + str(epoch) + ".pth")
+                    th.save(self.gen_shadow.state_dict(), gen_shadow_save_file)
 
         # return the generator and discriminator back to eval mode
         self.gen.eval()
