@@ -51,6 +51,7 @@ CLASS_MAPPING = "../classes_mapping.json"
 CRITERION = nn.CrossEntropyLoss()
 OPTIMIZER = lambda x, y, z: optim.Adam(x, lr=y, weight_decay=z)
 N_CLASSES = 36
+IM_SIZE = 299
 
 def save_config(args):
     with open(os.path.join(args.save_dir, "model_config.json"), 'w') as f:
@@ -70,8 +71,8 @@ def load_data(train_fpath, val_fpath, **kwargs):
 
     # resizing images
     if "resize" in kwargs:
-        train_transforms.append(transforms.Resize((299, 299)))
-        val_transforms.append(transforms.Resize((299, 299)))
+        train_transforms.append(transforms.Resize((IM_SIZE, IM_SIZE)))
+        val_transforms.append(transforms.Resize((IM_SIZE, IM_SIZE)))
 
     # convert to grayscale - compulsory
     train_transforms.append(transforms.Grayscale(3))
@@ -129,6 +130,9 @@ def load_model(name="inceptionv3", device='cpu'):
     elif name == "vgg16":
         model = torchvision.models.vgg16_bn(pretrained=True)
         model.classifier[6] = nn.Linear(4096, N_CLASSES)
+    elif name == "simple":
+        from custom_models import multiClassPerceptron
+        model = multiClassPerceptron(in_channels=3*299*299, hidden_layers=[], out_channels=N_CLASSES)
     else:
         raise ValueError("Model can only be `inceptionv3`, `vgg16` or `resnet18`")
 
