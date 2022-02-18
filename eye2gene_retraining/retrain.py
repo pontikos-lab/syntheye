@@ -315,7 +315,7 @@ if __name__ == "__main__":
     # for parsing command-line arguments
     parser = argparse.ArgumentParser()
     # dataset-related
-    parser.add_argument('--model', default="inceptionv3", help="Neural Network model", choices=["inceptionv3", "resnet18", "vgg16"])
+    parser.add_argument('--model', default="inceptionv3", help="Neural Network model", choices=["inceptionv3", "resnet18", "vgg16", "simple", "alexnet", "vgg11"])
     parser.add_argument('--train', help="Provide a csv file path to the training images", type=str)
     parser.add_argument('--val', help="Provide a csv file path to the validation set images", type=str)
     parser.add_argument('--resize', default=299, help="Desired dimension to resize image to", type=int)
@@ -369,4 +369,5 @@ if __name__ == "__main__":
     model = load_model(args.model, device)
 
     # begin model training
-    train_model(dataloaders, model, CRITERION, optimizer=OPTIMIZER(model.parameters(), args.lr, args.weight_decay), num_epochs=args.epochs, device=device, save_dir=args.save_dir, save_best_weights=args.save_best, w_monitor=args.w_monitor, early_stopping=args.es, es_monitor=args.es_monitor, epsilon=args.epsilon, tolerance=args.tolerance)
+    is_inception = True if args.model == "inceptionv3" else False
+    train_model(dataloaders, model, CRITERION, optimizer=OPTIMIZER(model.parameters(), args.lr, args.weight_decay), num_epochs=args.epochs, device=device, save_dir=args.save_dir, save_best_weights=args.save_best, w_monitor=args.w_monitor, early_stopping=args.es, es_monitor=args.es_monitor, epsilon=args.epsilon, tolerance=args.tolerance, is_inception=is_inception)
