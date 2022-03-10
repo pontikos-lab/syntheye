@@ -1,4 +1,5 @@
 # import libraries
+from locale import normalize
 import sys
 sys.path.append('..')
 import torch
@@ -51,8 +52,6 @@ CLASS_MAPPING = "../classes_mapping.json"
 CRITERION = nn.CrossEntropyLoss()
 OPTIMIZER = lambda x, y, z: optim.Adam(x, lr=y, weight_decay=z)
 N_CLASSES = 36
-IM_SIZE = 299
-N_CHANNELS = 3
 
 def save_config(args):
     with open(os.path.join(args.save_dir, "model_config.json"), 'w') as f:
@@ -70,40 +69,45 @@ def load_data(train_fpath, val_fpath, **kwargs):
     train_transforms = []
     val_transforms = []
 
-    # resizing images
-    if "resize" in kwargs:
-        train_transforms.append(transforms.Resize((IM_SIZE, IM_SIZE)))
-        val_transforms.append(transforms.Resize((IM_SIZE, IM_SIZE)))
+    # resizing images - compulsory 
+    # if "resize" in kwargs:
+    train_transforms.append(transforms.Resize((kwargs["resize"], kwargs["resize"])))
+    val_transforms.append(transforms.Resize((kwargs["resize"], kwargs["resize"])))
 
     # convert to grayscale - compulsory
-    train_transforms.append(transforms.Grayscale(N_CHANNELS))
-    val_transforms.append(transforms.Grayscale(N_CHANNELS))
+    train_transforms.append(transforms.Grayscale(kwargs["n_channels"]))
+    val_transforms.append(transforms.Grayscale(kwargs["n_channels"]))
 
     # random hflip - optional, but better for augmentation purposes 
-    if "random_hflip" in kwargs:
-        train_transforms.append(transforms.RandomHorizontalFlip(p=0.3))
+    # if "random_hflip" in kwargs:
+    train_transforms.append(transforms.RandomHorizontalFlip(p=0.3))
 
-    if "brightness" in kwargs:
-        train_transforms.append(transforms.ColorJitter(brightness=(0.5, 1.5)))
+    # if "brightness" in kwargs:
+    train_transforms.append(transforms.ColorJitter(brightness=(0.5, 1.5)))
 
-    if "rotation" in kwargs:
-        train_transforms.append(transforms.RandomAffine(degrees=15))
+    # if "rotation" in kwargs:
+    train_transforms.append(transforms.RandomAffine(degrees=15))
 
     # conversion into pytorch tensor - compulsory
     train_transforms.append(transforms.ToTensor())
     val_transforms.append(transforms.ToTensor())
 
     # normalize - good for compatibility with inceptionv3
-    if "normalize" in kwargs:
-        train_transforms.append(transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)))
-        val_transforms.append(transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)))
+    # if "normalize" in kwargs:
+    if kwargs["normalize"]:
+        if kwargs["n_channels"] == 3:
+            train_transforms.append(transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)))
+            val_transforms.append(transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)))
+        else:
+            train_transforms.append(transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)))
+            val_transforms.append(transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)))
 
     # create image transformations list
     train_transforms = transforms.Compose(train_transforms)
     val_transforms = transforms.Compose(val_transforms)
 
     log("Loading Datasets")
-    tfold = "train" if ("fold" in pd.read_csv(train_fpath).columns and len(pd.read_csv(train_fpath).fold.unique()) <= 4) else None
+    tfold = None #"train" if ("fold" in pd.read_csv(train_fpath).columns and len(pd.read_csv(train_fpath).fold.unique()) <= 4) else None
     vfold = "val" if ("fold" in pd.read_csv(val_fpath).columns) else None
     train_data = ImageDataset(data_file=train_fpath, fpath_col_name=FPATH_COL_NAME, lbl_col_name=LBL_COL_NAME, fold=tfold, class_vals=CLASSES, transforms=train_transforms, class_mapping=CLASS_MAPPING)
     val_data = ImageDataset(data_file=val_fpath, fpath_col_name=FPATH_COL_NAME, lbl_col_name=LBL_COL_NAME, fold=vfold, class_vals=CLASSES, transforms=val_transforms, class_mapping=CLASS_MAPPING)
@@ -116,7 +120,7 @@ def load_data(train_fpath, val_fpath, **kwargs):
     dataloaders = {"Train": train_data_loader, "Val": val_data_loader}
     return dataloaders
 
-def load_model(name="inceptionv3", device='cpu'):
+def load_model(name, device):
     """ Loads a pretrained InceptionV3 model, which is then updated using fine-tuning methods """
     # load pretrained InceptionV3 network
     log("Load pretrained {}".format(name))
@@ -139,7 +143,13 @@ def load_model(name="inceptionv3", device='cpu'):
         model.classifier[6] = nn.Linear(4096, N_CLASSES)
     elif name == "simple":
         from custom_models import multiClassPerceptron
-        model = multiClassPerceptron(in_channels=N_CHANNELS*IM_SIZE*IM_SIZE, hidden_layers=[], out_channels=N_CLASSES)
+        model = multiClassPerceptron(in_channels=3*299*299, hidden_layers=[], out_channels=N_CLASSES)
+    elif name == "densenet169":
+        model = torchvision.models.densenet169(pretrained=True)
+        model.classifier = nn.Linear(1664, N_CLASSES)
+    elif name == "efficient-net-b3":
+        model = torchvision.models.efficientnet_b3(pretrained=True)
+        model.classifier = nn.Linear(1536, N_CLASSES)
     else:
         raise ValueError("Model can only be `inceptionv3`, `vgg16` or `resnet18`")
 
@@ -315,10 +325,11 @@ if __name__ == "__main__":
     # for parsing command-line arguments
     parser = argparse.ArgumentParser()
     # dataset-related
-    parser.add_argument('--model', default="inceptionv3", help="Neural Network model", choices=["inceptionv3", "resnet18", "vgg16", "simple", "alexnet", "vgg11"])
+    parser.add_argument('--model', default="inceptionv3", help="Neural Network model", choices=["inceptionv3", "resnet18", "vgg16", "simple", "alexnet", "vgg11", "efficient-net-b3", "densenet169"])
     parser.add_argument('--train', help="Provide a csv file path to the training images", type=str)
     parser.add_argument('--val', help="Provide a csv file path to the validation set images", type=str)
     parser.add_argument('--resize', default=299, help="Desired dimension to resize image to", type=int)
+    parser.add_argument('--n-channels', default=3, help="Preprocess images to be 3 or 1 channel", type=int)
     parser.add_argument('--random-hflip', help="Adds a horizontal flip with probability p=0.3", default=1)
     parser.add_argument('--normalize', help="Normalizes images with mean [0.485, 0.456, 0.406] and std [0.229, 0.224, 0.225]", default=1)
     parser.add_argument('--brightness', help="Adds brightness to images", default=1)
