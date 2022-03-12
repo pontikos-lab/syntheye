@@ -97,7 +97,7 @@ if compute_similarity:
         real_data = ImageDataset(real_data_file, filenames_col, labels_col, [c], transforms.Compose(image_transforms))
         real_dataloader = DataLoader(real_data, batch_size=1024, shuffle=False, num_workers=8)
         synthetic_data = ImageDataset(synthetic_data_file, filenames_col, labels_col, [c], transforms.Compose(image_transforms))
-        synthetic_dataloader = DataLoader(synthetic_data, batch_size=50, shuffle=False, num_workers=8)
+        synthetic_dataloader = DataLoader(synthetic_data, batch_size=1024, shuffle=False, num_workers=8)
 
         # pass real images with generated images into the image similarity function
         sim_scores_per_class[c] = ComputeSimilarity(metric_name=similarity_metric)(synthetic_dataloader,

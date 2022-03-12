@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # create an image grid using a filepath to image dataset
-gen_imgs_path="results/data:faf_dataset_cleaned.csv_classes:classes.txt_trans:512-1-1_mod:cmsggan1-32-512_tr:1000-RAHinge-32-1-0.003-0.003-0.0-0.99/model_ema_state_125/generated_examples"
+gen_imgs_path=/home/zchayav/projects/syntheye/synthetic_datasets/all_folds/stylegan2_synthetic_100perclass
 nImagesPerRow=5
 classes=("ABCA4" "USH2A" "RPGR" "BEST1" "PRPH2" "RS1" "TIMP3" "PROML1")
 classes=${classes[@]}

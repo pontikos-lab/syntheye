@@ -55,16 +55,17 @@ class ComputeSimilarity:
             im_filtered = np.array(seg.generate(im_filtered.convert("RGB")))
         return im_filtered
 
-    def mse(self, im1, im2, in_parallel):
+    def mse(self, im1, im2, in_parallel=True, device='cpu'):
         if in_parallel:
             # standardize the images
-            im1, im2 = im1.type(torch.FloatTensor), im2.type(torch.FloatTensor)
-            im1 = (im1 - torch.mean(im1, dim=(1, 2))[:, None, None]) / torch.std(im1, dim=(1, 2))[:, None, None]
-            im2 = (im2 - torch.mean(im2, dim=(1, 2))[:, None, None]) / torch.std(im2, dim=(1, 2))[:, None, None]
+            type_ = torch.FloatTensor if device == "cpu" else torch.cuda.FloatTensor
+            im1, im2 = im1.type(type_), im2.type(type_)
+            im1 = (im1 - torch.mean(im1, dim=(1, 2, 3))[:, None, None, None]) / torch.std(im1, dim=(1, 2, 3))[:, None, None, None]
+            im2 = (im2 - torch.mean(im2, dim=(1, 2, 3))[:, None, None, None]) / torch.std(im2, dim=(1, 2, 3))[:, None, None, None]
             # compute mse
-            metric_values = torch.sum(im1**2, dim=(1, 2))[:, None] - 2 * torch.einsum('nhw,mhw->nm', im1, im2) + torch.sum(im2 ** 2, dim=(1, 2))[None, :]
+            metric_values = torch.sum(im1**2, dim=(1, 2, 3))[:, None] - 2 * torch.einsum('nchw,mchw->nm', im1, im2) + torch.sum(im2 ** 2, dim=(1, 2, 3))[None, :]
             metric_values = metric_values / (im1.shape[-1]*im1.shape[-2])
-            metric_values = metric_values.numpy().ravel()
+            metric_values = metric_values.detach().cpu().numpy().ravel()
         else:
             from skimage.metrics import mean_squared_error
             real_synthetic_pairs = list(product(im1, im2))
@@ -126,6 +127,8 @@ class ComputeSimilarity:
 
     def __call__(self, im1_dataloader, im2_dataloader, process_images=False, return_top=None, **kwargs):
 
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
         alpha = kwargs["alpha"] if "alpha" in kwargs.keys() else 3.0
         beta = kwargs["beta"] if "beta" in kwargs.keys() else 0.0
         filter = kwargs["filter"] if "filter" in kwargs.keys() else "gaussian"
@@ -135,7 +138,7 @@ class ComputeSimilarity:
 
         # select similarity metric function
         if self.metric_name == "MSE":
-            func = lambda x, y: self.mse(x, y, in_parallel=True)
+            func = lambda x, y: self.mse(x, y, in_parallel=True, device=device)
         elif self.metric_name == "PearsonR":
             func = lambda x, y: self.pearsoncorr(x, y, in_parallel=True)
         elif self.metric_name == "RMSE":
@@ -153,22 +156,28 @@ class ComputeSimilarity:
         metrics = pd.DataFrame(
             columns=["gen_image_index", "real_image_index", "gen_image_path", "real_image_path", self.metric_name])
 
-        for i, spath, simages, stargets in im1_dataloader:
-            for j, rpath, rimages, rtargets in tqdm(im2_dataloader):
+        for i, spath, simages, _ in tqdm(im1_dataloader):
+            for j, rpath, rimages, _ in im2_dataloader:
 
                 # cast tensors to integer type uint8
-                simages, rimages = (simages.squeeze() * 255).type(torch.ByteTensor), (rimages.squeeze() * 255).type(torch.ByteTensor)
+                simages, rimages = (simages.to(device) * 255).type(torch.ByteTensor), (rimages.to(device) * 255).type(torch.ByteTensor)
+                assert len(simages.shape) == 4
+                assert len(rimages.shape) == 4
 
                 # compare real and synthetic pairs
                 real_synthetic_pair_idxs = np.array(list(product(i, j)))
                 real_synthetic_pair_paths = np.array(list(product(spath, rpath)))
 
                 if process_images:
+                    process_func = lambda x: self.process_images(x, alpha, beta, filter, fsize, threshold, tsize)
                     # process real and synthetic images
-                    simages, rimages = np.uint8(simages.numpy()), np.uint8(rimages.numpy())
-                    simages = [self.process_images(simages[i], alpha, beta, filter, fsize, threshold, tsize) for i in range(len(simages))]
-                    rimages = [self.process_images(rimages[i], alpha, beta, filter, fsize, threshold, tsize) for i in range(len(rimages))]
-                    simages, rimages = torch.as_tensor(simages).type(torch.ByteTensor), torch.as_tensor(rimages).type(torch.ByteTensor)
+                    simages, rimages = np.uint8(simages.detach().cpu().numpy()), np.uint8(rimages.detach().cpu().numpy())
+                    simages = np.array(list(map(process_func, simages)))
+                    rimages = np.array(list(map(process_func, rimages)))
+                    # simages = [self.process_images(simages[i], alpha, beta, filter, fsize, threshold, tsize) for i in range(len(simages))]
+                    # rimages = [self.process_images(rimages[i], alpha, beta, filter, fsize, threshold, tsize) for i in range(len(rimages))]
+                    type_ = torch.ByteTensor if device == "cpu" else torch.cuda.ByteTensor 
+                    simages, rimages = torch.as_tensor(simages).type(type_), torch.as_tensor(rimages).type(type_)
 
                 # compute similarity metric given two tensors of dimension (M, X, X) and (N, X, X)
                 metric_values = func(simages, rimages)
@@ -185,7 +194,7 @@ class ComputeSimilarity:
                                            self.metric_name])
 
                 # update dataframe
-                metrics = metrics.append(df, ignore_index=True)
+                metrics = pd.concat([metrics, df])
 
         ascending = True if self.metric_name in ["MSE", "RMSE", "PSNR"] else False
         metrics = metrics.sort_values(by=self.metric_name, ascending=ascending, ignore_index=True)
@@ -216,7 +225,7 @@ class ComputeQuality:
             quality_vals = [brisq.get_score(np.array(Image.open(im_paths[i]))) for i in range(len(im_batch))]
             quality_vals = list(zip(im_paths, quality_vals))
             df = pd.DataFrame(np.array(quality_vals), columns=["Synthetic image path", "Quality Score"])
-            all_quality_vals = all_quality_vals.append(df)
+            all_quality_vals = pd.concat([all_quality_vals, df])
 
         return all_quality_vals
 

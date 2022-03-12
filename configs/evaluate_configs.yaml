@@ -1,6 +1,6 @@
 # DATA
-real_data_file: /home/zchayav/projects/syntheye/datasets/eye2gene_new_filepaths/all_baf_valid_50deg_filtered_train_0_edited.csv
-synthetic_data_file: /home/zchayav/projects/syntheye/datasets/syntheye/all_folds/synthetic_10800_only.csv
+real_data_file: /home/zchayav/projects/syntheye/datasets/eye2gene_new_filepaths/all_baf_valid_50deg_filtered_train_0_NOREPEATS.csv
+synthetic_data_file: /home/zchayav/projects/stylegan2-ada-pytorch/synthetic_datasets/stylegan2_synthetic_-3perclass/generated_examples2.csv
 filenames_col: file.path
 labels_col: gene
 classes: all
