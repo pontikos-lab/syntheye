@@ -15,6 +15,15 @@ def set_seed(seed):
     torch.cuda.manual_seed(seed)
     np.random.seed(seed)
 
+def count_params(model):
+    count = 0
+    for param in model.parameters():
+        count += param.ravel().shape[0]
+    return count
+
+def logger(text, verbose=1):
+    if verbose:
+        print(text)
 
 def load_config(config_file):
     """ Loads model configuration file """

@@ -1,6 +1,6 @@
 # DATA
-real_data_file: /home/zchayav/projects/syntheye/datasets/eye2gene_new_filepaths/all_baf_valid_50deg_filtered_train_0_NOREPEATS.csv
-synthetic_data_file: /home/zchayav/projects/stylegan2-ada-pytorch/synthetic_datasets/stylegan2_synthetic_-3perclass/generated_examples2.csv
+real_data_file: /home/zchayav/projects/stylegan2-ada-pytorch/synthetic_datasets/stylegan2_synthetic_-3perclass/generated_examples2.csv
+synthetic_data_file: /home/zchayav/projects/syntheye/datasets/eye2gene_new_filepaths/all_baf_valid_50deg_filtered_val_0_NO_REPEATS.csv
 filenames_col: file.path
 labels_col: gene
 classes: all
@@ -9,7 +9,7 @@ transformations:
   grayscale: 1
 
 # EVALUATION SETTINGS
-save_dir: quantitative_results/stylegan2_results/
+save_dir: quantitative_results/stylegan2_results/real_vs_test_mse
 similarity_check:
   compute: 1
   process_images:

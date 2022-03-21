@@ -99,8 +99,8 @@ def load_data(train_fpath, val_fpath, **kwargs):
             train_transforms.append(transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)))
             val_transforms.append(transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)))
         else:
-            train_transforms.append(transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)))
-            val_transforms.append(transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)))
+            train_transforms.append(transforms.Normalize(0.5, 0.5))
+            val_transforms.append(transforms.Normalize(0.5, 0.5))
 
     # create image transformations list
     train_transforms = transforms.Compose(train_transforms)
@@ -143,13 +143,16 @@ def load_model(name, device):
         model.classifier[6] = nn.Linear(4096, N_CLASSES)
     elif name == "simple":
         from custom_models import multiClassPerceptron
-        model = multiClassPerceptron(in_channels=3*299*299, hidden_layers=[], out_channels=N_CLASSES)
+        model = multiClassPerceptron(in_channels=1*299*299, hidden_layers=[], out_channels=N_CLASSES)
     elif name == "densenet169":
         model = torchvision.models.densenet169(pretrained=True)
         model.classifier = nn.Linear(1664, N_CLASSES)
     elif name == "efficient-net-b3":
         model = torchvision.models.efficientnet_b3(pretrained=True)
         model.classifier = nn.Linear(1536, N_CLASSES)
+    elif name == "simple-convnet":
+        from custom_models import simpleConvNet
+        model = simpleConvNet()
     else:
         raise ValueError("Model can only be `inceptionv3`, `vgg16` or `resnet18`")
 
@@ -325,7 +328,7 @@ if __name__ == "__main__":
     # for parsing command-line arguments
     parser = argparse.ArgumentParser()
     # dataset-related
-    parser.add_argument('--model', default="inceptionv3", help="Neural Network model", choices=["inceptionv3", "resnet18", "vgg16", "simple", "alexnet", "vgg11", "efficient-net-b3", "densenet169"])
+    parser.add_argument('--model', default="inceptionv3", help="Neural Network model", choices=["inceptionv3", "resnet18", "vgg16", "simple", "alexnet", "vgg11", "efficient-net-b3", "densenet169", "simple-convnet"])
     parser.add_argument('--train', help="Provide a csv file path to the training images", type=str)
     parser.add_argument('--val', help="Provide a csv file path to the validation set images", type=str)
     parser.add_argument('--resize', default=299, help="Desired dimension to resize image to", type=int)
