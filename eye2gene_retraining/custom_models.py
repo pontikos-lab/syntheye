@@ -29,35 +29,37 @@ class simpleConvNet(nn.Module):
     """ Basic Multi-Class Logistic Regression Model """
     def __init__(self):
         super(simpleConvNet, self).__init__()
-        self.conv1 = nn.Conv2d(in_channels=1, out_channels=32, kernel_size=3)
-        # self.conv1_bn = nn.BatchNorm2d(32)
-        self.conv2 = nn.Conv2d(in_channels=32, out_channels=32, kernel_size=3)
-        # self.conv2_bn = nn.BatchNorm2d(32)
-        self.conv3 = nn.Conv2d(in_channels=32, out_channels=64, kernel_size=3)
-        # self.conv3_bn = nn.BatchNorm2d(32)
-        # self.conv4 = nn.Conv2d(in_channels=64, out_channels=64, kernel_size=3)
-        # self.conv4_bn = nn.BatchNorm2d(64)
-        # self.conv5 = nn.Conv2d(in_channels=64, out_channels=64, kernel_size=3)
-        # self.conv5_bn = nn.BatchNorm2d(64)
-        self.dense1 = nn.Linear(in_features=246016, out_features=512)
-        self.dense2 = nn.Linear(in_features=512, out_features=36)
-        # self.dense3 = nn.Linear(in_features=64, out_features=36)
+        self.conv1 = nn.Conv2d(in_channels=1, out_channels=32, kernel_size=3, padding=1)
+        torch.nn.init.xavier_uniform_(self.conv1.weight)
+
+        self.conv2 = nn.Conv2d(in_channels=32, out_channels=32, kernel_size=3, padding=1)
+        torch.nn.init.xavier_uniform_(self.conv2.weight)
+
+        self.conv3 = nn.Conv2d(in_channels=32, out_channels=32, kernel_size=3, padding=1)
+        torch.nn.init.xavier_uniform_(self.conv3.weight)
+
+        self.dense1 = nn.Linear(in_features=64*64*32, out_features=2048)
+        torch.nn.init.xavier_uniform_(self.dense1.weight)
+
+        self.dense2 = nn.Linear(in_features=2048, out_features=36)
+        torch.nn.init.xavier_uniform_(self.dense2.weight)
+
         self.maxpool = nn.MaxPool2d(kernel_size=2, stride=2)
         self.relu = nn.ReLU()
-        self.dropout = nn.Dropout(p=0.0) # TODO: Try p=0.2 and 0.1. 
+
+        self.dropout = nn.Dropout(p=0.5) # TODO: Try p=0.2 and 0.1. 
 
     def forward(self, __input__):
-        x = __input__
-        x = self.maxpool(self.relu(self.conv1(x)))
-        x = self.maxpool(self.relu(self.conv2(x)))
-        x = self.maxpool(self.relu(self.conv3(x)))
-        # x = self.maxpool(self.relu(self.conv4(x)))
-        # x = self.maxpool(self.relu(self.conv5(x)))
-        x = x.view(len(x), -1)
-        x = self.dropout(x)
-        x = self.relu(self.dense1(x))
-        # x = self.dropout(x) # TODO: Remove this dropout and try with only one dropout in the previous layer
-        # x = self.relu(self.dense2(x))
-        # x = self.dense3(x)
-        out = self.dense2(x)
+        x = __input__ # (None, 1, 512, 512)
+
+        # Conv network
+        x = self.maxpool(self.relu(self.conv1(x))) # (None, 32, 256, 256)
+        x = self.maxpool(self.relu(self.conv2(x))) # (None, 32, 128, 128)
+        x = self.maxpool(self.relu(self.conv3(x))) # (None, 32, 64, 64)
+        
+        # FC network
+        x = x.view(len(x), -1) # (None, 32*64*64)
+        x = self.dropout(x) # (None, 32*64*64)
+        x = self.relu(self.dense1(x)) # (None, 2048)
+        out = self.dense2(x) # (None, 36)
         return out

@@ -17,6 +17,18 @@ import argparse
 from ae_model import ConvolutionalAE
 from torchvision.utils import make_grid
 
+def get_devices(device):
+    if device == "cpu" or not torch.cuda.is_available():
+        print("Training on cpu")
+        device = args.device
+    elif len(device) == 1:
+        device = int(args.device)
+        print("Found 1 GPU : cuda:{}".format(device))
+    else:
+        device = list(map(int, args.device.split(',')))
+        print("Found {} GPUs : ".format(len(device)) + ", ".join(["cuda:{}".format(x) for x in device]))
+    return device
+
 def save_config(args):
     with open(os.path.join(args.save_dir, "model_config.json"), 'w') as f:
         json.dump(vars(args), f)
@@ -57,15 +69,15 @@ def dump_history(history, save_dir):
     with open(os.path.join(save_dir, "training_history.json"), 'w') as f:
         json.dump(history, f)
 
-def load_datasets(training_fpath, val_fpath, b_size):
+def load_datasets(training_fpath, val_fpath, im_resize, b_size):
     
     # set global variables
     with open("../classes.txt") as f:
         classes = f.read().splitlines()
     
     # prepare data transformations
-    train_transforms = transforms.Compose([transforms.Resize((256, 256)), transforms.Grayscale(1), transforms.ToTensor(), transforms.Normalize((0.5, ), (0.5, ))])
-    val_transforms = transforms.Compose([transforms.Resize((256, 256)), transforms.Grayscale(1), transforms.ToTensor(), transforms.Normalize((0.5,), (0.5, ))])
+    train_transforms = transforms.Compose([transforms.Resize((im_resize, im_resize)), transforms.Grayscale(1), transforms.ToTensor(), transforms.Normalize((0.5, ), (0.5, ))])
+    val_transforms = transforms.Compose([transforms.Resize((im_resize, im_resize)), transforms.Grayscale(1), transforms.ToTensor(), transforms.Normalize((0.5,), (0.5, ))])
     
     # prepare datasets
     train_data = ImageDataset(training_fpath, "file.path", "gene", classes, train_transforms)
@@ -73,7 +85,7 @@ def load_datasets(training_fpath, val_fpath, b_size):
     
     # prepare dataloaders
     train_dataloader = DataLoader(train_data, batch_size=b_size, shuffle=True)
-    val_dataloader = DataLoader(val_data, batch_size=b_size)
+    val_dataloader = DataLoader(val_data, batch_size=b_size, shuffle=True)
     
     return train_dataloader, val_dataloader
 
@@ -83,7 +95,15 @@ def train_model(dataloaders, model, criterion, optimizer, num_epochs, save_step,
     log = lambda x: logger(x, verbose=verbose)
     
     # push model to device
-    model.to(device)
+    if isinstance(device, list):
+        base_device = torch.device("cuda:" + str(device[0]))
+        model.to(base_device)
+        model = nn.DataParallel(model, device_ids=device)
+    elif isinstance(device, int):
+        base_device = torch.device("cuda:"+str(device))
+        model.to(base_device)
+    else:
+        base_device = device
 
     # store dataset sizes
     train_data_size = len(dataloaders["Train"].dataset)
@@ -111,7 +131,7 @@ def train_model(dataloaders, model, criterion, optimizer, num_epochs, save_step,
             
             # Iterate over data.
             for _, _, inputs, _ in tqdm(dataloaders[phase]):
-                inputs = inputs.to(device)
+                inputs = inputs.to(base_device)
 
                 # zero the parameter gradients
                 optimizer.zero_grad()
@@ -142,7 +162,10 @@ def train_model(dataloaders, model, criterion, optimizer, num_epochs, save_step,
                 if epoch_cur_loss < best_loss:
                     log("Loss has reduced from {} to {}. Updating weights".format(best_loss, epoch_cur_loss))
                     best_loss = epoch_cur_loss
-                    torch.save(model.state_dict(), os.path.join(save_dir, "best_weights.pth"))
+                    if isinstance(device, list):
+                        torch.save(model.module.state_dict(), os.path.join(save_dir, "best_weights.pth"))
+                    else:
+                        torch.save(model.state_dict(), os.path.join(save_dir, "best_weights.pth"))
 
         # visualize metrics and image reconstructions
         if (epoch + 1) % save_step == 0 or epoch == 0:
@@ -162,6 +185,7 @@ if __name__ == "__main__":
     parser.add_argument('--val-fpath', help="Provide a csv file path to the validation set images", type=str)
 
     # training hyperparams
+    parser.add_argument('--resize', default=512, help="Dimensions of resized image", type=int)
     parser.add_argument('--latent-size', help="Size of feature vector to learn with autoencoder", default=256, type=int)
     parser.add_argument('--epochs', default=100, help="Number of epochs", type=int)
     parser.add_argument('--loss', default="mse", help="Loss function for Autoencoder")
@@ -172,15 +196,13 @@ if __name__ == "__main__":
     parser.add_argument('--save-step', default=1, help="Save performance and image reconstructions", type=int)
     parser.add_argument('--save-dir', default="results/", help="Name of directory in which to save experiment results and logs.", type=str)
     parser.add_argument('-v', '--verbose', help="Prints logs of the progress during model training", action="store_false")
-    parser.add_argument('-d', '--device', help="Devices on which model is trained", type=int, default=0)
+    parser.add_argument('-d', '--device', help="Devices on which model is trained", type=str)
     parser.add_argument('--seed', help="To ensure reproducibility of results", type=int, default=1399)
     args = parser.parse_args()
 
     # ensures reproducibility
     set_seed(args.seed)
-
-    # set device
-    device = torch.device("cuda:{}".format(args.device) if torch.cuda.is_available() else "cpu")
+    log = lambda x: logger(x, verbose=args.verbose)
 
     # make training results directory if doesn't exist
     if args.save_dir is not None:
@@ -189,22 +211,26 @@ if __name__ == "__main__":
     # save config
     save_config(args)
 
+    # get devices
+    args.device = get_devices(args.device)
+    print(args.device)
+
     # create dataloaders
-    dataloaders = load_datasets(args.train_fpath, args.val_fpath, b_size=args.batch_size)
-    logger("Found {} training images belonging to {} classes".format(len(dataloaders[0].dataset), dataloaders[0].dataset.n_classes), verbose=args.verbose)
-    logger("Found {} test images belonging to {} classes\n".format(len(dataloaders[1].dataset), dataloaders[1].dataset.n_classes), verbose=args.verbose)
+    dataloaders = load_datasets(args.train_fpath, args.val_fpath, im_resize=args.resize, b_size=args.batch_size)
+    log("Found {} training images belonging to {} classes".format(len(dataloaders[0].dataset), dataloaders[0].dataset.n_classes))
+    log("Found {} test images belonging to {} classes\n".format(len(dataloaders[1].dataset), dataloaders[1].dataset.n_classes))
 
     # load model
-    logger("Loading Model:\n", args.verbose)
-    model = ConvolutionalAE(latent_size=args.latent_size)
-    logger(model, args.verbose)
+    log("Loading Model:\n")
+    model = ConvolutionalAE(im_size=args.resize, latent_size=args.latent_size)
+    log(model)
     
     # load other components
     criterion = nn.MSELoss() if args.loss == "mse" else nn.L1Loss()
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
 
     # begin model training
-    logger("\nBegin Model Training:\n", args.verbose)
+    log("\nBegin Model Training:\n")
     training_history = train_model({"Train":dataloaders[0], "Val":dataloaders[1]}, model, criterion, optimizer, args.epochs, args.save_step, args.save_dir, args.device, args.verbose)
 
     # save training history
