@@ -794,11 +794,240 @@ class Decoder_65536_512(nn.Module):
         y = self.decoder(x)
         return y
 
+class Encoder_512_1024_v2(nn.Module):
+    def __init__(self):
+        super(Encoder_512_1024_v2, self).__init__()
+        self.encoder = nn.Sequential(
+            # block 1
+            nn.Conv2d(in_channels=1, out_channels=16, kernel_size=3, padding=1), # (None, 16, 512, 512)
+            nn.ReLU(),
+            nn.MaxPool2d(kernel_size=2, stride=2), # (None, 16, 256, 256)
+
+            # block 2
+            nn.Conv2d(in_channels=16, out_channels=32, kernel_size=3, padding=1), # (None, 16, 256, 256)
+            nn.ReLU(),
+            nn.MaxPool2d(kernel_size=2, stride=2), # (None, 32, 128, 128)
+
+            # block 3
+            nn.Conv2d(in_channels=32, out_channels=64, kernel_size=3, padding=1), # (None, 64, 128, 128)
+            nn.ReLU(),
+            nn.MaxPool2d(kernel_size=2, stride=2), # (None, 64, 64, 64)
+
+            # block 4
+            nn.Conv2d(in_channels=64, out_channels=128, kernel_size=3, padding=1), # (None, 128, 64, 64)
+            nn.ReLU(),
+            nn.MaxPool2d(kernel_size=2, stride=2), # (None, 128, 32, 32)
+
+            # block 5
+            nn.Conv2d(in_channels=128, out_channels=256, kernel_size=3, padding=1), # (None, 256, 32, 32)
+            nn.ReLU(),
+            nn.MaxPool2d(kernel_size=2, stride=2), # (None, 256, 16, 16)
+
+            # block 6
+            nn.Conv2d(in_channels=256, out_channels=512, kernel_size=3, padding=1), # (None, 512, 16, 16)
+            nn.ReLU(),
+            nn.MaxPool2d(kernel_size=2, stride=2), # (None, 512, 8, 8)
+
+            # block 7
+            nn.Conv2d(in_channels=512, out_channels=1024, kernel_size=3, padding=1), # (None, 1024, 8, 8)
+            nn.ReLU(),
+            nn.MaxPool2d(kernel_size=2, stride=2), # (None, 1024, 4, 4)
+
+            # block 8
+            nn.Conv2d(in_channels=1024, out_channels=1024, kernel_size=4, padding=1, stride=2), # (None, 1024, 2, 2)
+            nn.ReLU(),
+            nn.MaxPool2d(kernel_size=2, stride=2), # (None, 1024, 1, 1)
+
+            # # block 8
+            # nn.Conv2d(in_channels=1024, out_channels=2048, kernel_size=3, padding=1), # (None, 2048, 4, 4)
+            # nn.ReLU(),
+            # nn.MaxPool2d(kernel_size=2, stride=2), # (None, 2048, 2, 2)
+
+            # # block 9
+            # nn.Conv2d(in_channels=2048, out_channels=4096, kernel_size=3, padding=1), # (None, 4096, 2, 2)
+            # nn.ReLU(),
+            # nn.MaxPool2d(kernel_size=2, stride=2), # (None, 4096, 1, 1)
+
+            # flattening layer
+            nn.Flatten(), # (None, 1024)
+            # nn.Linear(in_features=1024, out_features=1024)
+        )
+    
+    def forward(self, x):
+        y = self.encoder(x)
+        return y
+
+class Decoder_1024_512_v2(nn.Module):
+    def __init__(self):
+        super(Decoder_1024_512_v2, self).__init__()
+        self.decoder = nn.Sequential(
+            # reshape layer
+            Reshape(in_features=1024, out_channels=1024), # (None, 1024, 1, 1)
+            
+            # block 1
+            nn.ConvTranspose2d(in_channels=1024, out_channels=1024, kernel_size=4, stride=2),
+            nn.BatchNorm2d(1024),
+            nn.ReLU(), # (None, 1024, 4, 4)
+            
+            # block 2
+            nn.ConvTranspose2d(in_channels=1024, out_channels=512, kernel_size=2, stride=2),
+            nn.BatchNorm2d(512),
+            nn.ReLU(), # (None, 512, 8, 8)
+            
+            # block 3
+            nn.ConvTranspose2d(in_channels=512, out_channels=256, kernel_size=2, stride=2),
+            nn.BatchNorm2d(256),
+            nn.ReLU(), # (None, 256, 16, 16)
+            
+            # block 4
+            nn.ConvTranspose2d(in_channels=256, out_channels=128, kernel_size=2, stride=2),
+            nn.BatchNorm2d(128),
+            nn.ReLU(), # (None, 128, 32, 32)
+            
+            # block 5
+            nn.ConvTranspose2d(in_channels=128, out_channels=64, kernel_size=2, stride=2),
+            nn.BatchNorm2d(64),
+            nn.Tanh(), # (None, 64, 64, 64)
+
+            # block 6
+            nn.ConvTranspose2d(in_channels=64, out_channels=32, kernel_size=2, stride=2),
+            nn.BatchNorm2d(32),
+            nn.Tanh(), # (None, 32, 128, 128)
+
+            # block 7
+            nn.ConvTranspose2d(in_channels=32, out_channels=16, kernel_size=2, stride=2),
+            nn.BatchNorm2d(16),
+            nn.Tanh(), # (None, 16, 256, 256)
+
+            # block 8
+            nn.ConvTranspose2d(in_channels=16, out_channels=1, kernel_size=2, stride=2),
+            nn.BatchNorm2d(1),
+            nn.Tanh(), # (None, 1, 512, 512)
+        )
+    
+    def forward(self, x):
+        y = self.decoder(x)
+        return y
+
+class Encoder_512_2048_v2(nn.Module):
+    def __init__(self):
+        super(Encoder_512_2048_v2, self).__init__()
+        self.encoder = nn.Sequential(
+            # block 1
+            nn.Conv2d(in_channels=1, out_channels=16, kernel_size=3, padding=1), # (None, 16, 512, 512)
+            nn.ReLU(),
+            nn.MaxPool2d(kernel_size=2, stride=2), # (None, 16, 256, 256)
+
+            # block 2
+            nn.Conv2d(in_channels=16, out_channels=32, kernel_size=3, padding=1), # (None, 16, 256, 256)
+            nn.ReLU(),
+            nn.MaxPool2d(kernel_size=2, stride=2), # (None, 32, 128, 128)
+
+            # block 3
+            nn.Conv2d(in_channels=32, out_channels=64, kernel_size=3, padding=1), # (None, 64, 128, 128)
+            nn.ReLU(),
+            nn.MaxPool2d(kernel_size=2, stride=2), # (None, 64, 64, 64)
+
+            # block 4
+            nn.Conv2d(in_channels=64, out_channels=128, kernel_size=3, padding=1), # (None, 128, 64, 64)
+            nn.ReLU(),
+            nn.MaxPool2d(kernel_size=2, stride=2), # (None, 128, 32, 32)
+
+            # block 5
+            nn.Conv2d(in_channels=128, out_channels=256, kernel_size=3, padding=1), # (None, 256, 32, 32)
+            nn.ReLU(),
+            nn.MaxPool2d(kernel_size=2, stride=2), # (None, 256, 16, 16)
+
+            # block 6
+            nn.Conv2d(in_channels=256, out_channels=512, kernel_size=3, padding=1), # (None, 512, 16, 16)
+            nn.ReLU(),
+            nn.MaxPool2d(kernel_size=2, stride=2), # (None, 512, 8, 8)
+
+            # block 7
+            nn.Conv2d(in_channels=512, out_channels=1024, kernel_size=3, padding=1), # (None, 1024, 8, 8)
+            nn.ReLU(),
+            nn.MaxPool2d(kernel_size=2, stride=2), # (None, 1024, 4, 4)
+
+            # block 8
+            nn.Conv2d(in_channels=1024, out_channels=2048, kernel_size=4, padding=1, stride=2), # (None, 2048, 2, 2)
+            nn.ReLU(),
+            nn.MaxPool2d(kernel_size=2, stride=2), # (None, 2048, 1, 1)
+
+            # # block 8
+            # nn.Conv2d(in_channels=1024, out_channels=2048, kernel_size=3, padding=1), # (None, 2048, 4, 4)
+            # nn.ReLU(),
+            # nn.MaxPool2d(kernel_size=2, stride=2), # (None, 2048, 2, 2)
+
+            # # block 9
+            # nn.Conv2d(in_channels=2048, out_channels=4096, kernel_size=3, padding=1), # (None, 4096, 2, 2)
+            # nn.ReLU(),
+            # nn.MaxPool2d(kernel_size=2, stride=2), # (None, 4096, 1, 1)
+
+            # flattening layer
+            nn.Flatten(), # (None, 2048)
+            # nn.Linear(in_features=1024, out_features=1024)
+        )
+    
+    def forward(self, x):
+        y = self.encoder(x)
+        return y
+
+class Decoder_2048_512_v2(nn.Module):
+    def __init__(self):
+        super(Decoder_2048_512_v2, self).__init__()
+        self.decoder = nn.Sequential(
+            # reshape layer
+            Reshape(in_features=2048, out_channels=2048), # (None, 2048, 1, 1)
+            
+            # block 1
+            nn.ConvTranspose2d(in_channels=2048, out_channels=1024, kernel_size=4, stride=2),
+            nn.BatchNorm2d(1024),
+            nn.ReLU(), # (None, 1024, 4, 4)
+            
+            # block 2
+            nn.ConvTranspose2d(in_channels=1024, out_channels=512, kernel_size=2, stride=2),
+            nn.BatchNorm2d(512),
+            nn.ReLU(), # (None, 512, 8, 8)
+            
+            # block 3
+            nn.ConvTranspose2d(in_channels=512, out_channels=256, kernel_size=2, stride=2),
+            nn.BatchNorm2d(256),
+            nn.ReLU(), # (None, 256, 16, 16)
+            
+            # block 4
+            nn.ConvTranspose2d(in_channels=256, out_channels=128, kernel_size=2, stride=2),
+            nn.BatchNorm2d(128),
+            nn.ReLU(), # (None, 128, 32, 32)
+            
+            # block 5
+            nn.ConvTranspose2d(in_channels=128, out_channels=64, kernel_size=2, stride=2),
+            nn.BatchNorm2d(64),
+            nn.Tanh(), # (None, 64, 64, 64)
+
+            # block 6
+            nn.ConvTranspose2d(in_channels=64, out_channels=32, kernel_size=2, stride=2),
+            nn.BatchNorm2d(32),
+            nn.Tanh(), # (None, 32, 128, 128)
+
+            # block 7
+            nn.ConvTranspose2d(in_channels=32, out_channels=16, kernel_size=2, stride=2),
+            nn.BatchNorm2d(16),
+            nn.Tanh(), # (None, 16, 256, 256)
+
+            # block 8
+            nn.ConvTranspose2d(in_channels=16, out_channels=1, kernel_size=2, stride=2),
+            nn.BatchNorm2d(1),
+            nn.Tanh(), # (None, 1, 512, 512)
+        )
+    
+    def forward(self, x):
+        y = self.decoder(x)
+        return y
 
 # =================================================
 
 architectures = {256: {256: (Encoder_256_256(), Decoder_256_256()), 512: (), 1024: (Encoder_256_1024(), Decoder_1024_256()), 2048: ()},
-                 512: {256: (), 512:(Encoder_512_512(), Decoder_512_512()), 1024: (Encoder_512_1024(), Decoder_1024_512()), 2048: (Encoder_512_2048(), Decoder_2048_512()), 4096: (Encoder_512_4096(), Decoder_4096_512()), 65536: (Encoder_512_65536(), Decoder_65536_512())}}
+                 512: {512:(Encoder_512_512(), Decoder_512_512()), 1024: (Encoder_512_1024_v2(), Decoder_1024_512_v2()), 2048: (Encoder_512_2048_v2(), Decoder_2048_512_v2()), 4096: (Encoder_512_4096(), Decoder_4096_512()), 65536: (Encoder_512_65536(), Decoder_65536_512())}}
 
 class ConvolutionalAE(nn.Module):
     def __init__(self, im_size, latent_size):
