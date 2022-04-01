@@ -153,6 +153,9 @@ def load_model(name, device):
     elif name == "simple-convnet":
         from custom_models import simpleConvNet
         model = simpleConvNet()
+    elif name == "feature-based":
+        from custom_models import featureBased
+        model = featureBased()
     else:
         raise ValueError("Model can only be `inceptionv3`, `vgg16` or `resnet18`")
 
@@ -328,7 +331,7 @@ if __name__ == "__main__":
     # for parsing command-line arguments
     parser = argparse.ArgumentParser()
     # dataset-related
-    parser.add_argument('--model', default="inceptionv3", help="Neural Network model", choices=["inceptionv3", "resnet18", "vgg16", "simple", "alexnet", "vgg11", "efficient-net-b3", "densenet169", "simple-convnet"])
+    parser.add_argument('--model', default="inceptionv3", help="Neural Network model", choices=["inceptionv3", "resnet18", "vgg16", "simple", "alexnet", "vgg11", "efficient-net-b3", "densenet169", "simple-convnet", "feature-based"])
     parser.add_argument('--train', help="Provide a csv file path to the training images", type=str)
     parser.add_argument('--val', help="Provide a csv file path to the validation set images", type=str)
     parser.add_argument('--resize', default=299, help="Desired dimension to resize image to", type=int)

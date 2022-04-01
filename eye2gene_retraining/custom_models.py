@@ -25,6 +25,29 @@ class multiClassPerceptron(nn.Module):
                 x = F.relu(x)
         return x
 
+class featureBased(nn.Module):
+    def __init__(self):
+        super(featureBased, self).__init__()
+        self.encoder = self.load_autoencoder()
+        # freeze encoder weights
+        for param in self.encoder.parameters():
+            param.requires_grad=False
+        self.dense = nn.Linear(in_features=2048, out_features=36)
+
+    def load_autoencoder(self):
+        # compress images into 1024 dim space using autoencoder
+        from image_encoder.ae_model import ConvolutionalAE
+        weights = torch.load("/home/zchayav/projects/syntheye/image_encoder/experiment_7/best_weights.pth")
+        autoencoder = ConvolutionalAE(im_size=512, latent_size=2048)
+        autoencoder.load_state_dict(weights)
+        autoencoder.eval()
+        return autoencoder.encoder
+
+    def forward(self, x):
+        x = self.encoder(x)
+        x = self.dense(x)
+        return x
+
 class simpleConvNet(nn.Module):
     """ Basic Multi-Class Logistic Regression Model """
     def __init__(self):

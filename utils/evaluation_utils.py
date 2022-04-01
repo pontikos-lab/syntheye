@@ -125,16 +125,22 @@ class ComputeSimilarity:
                 metric_values = [r.result() for r in concurrent.futures.as_completed(metric_values)]
         return metric_values
 
-    def __call__(self, im1_dataloader, im2_dataloader, process_images=False, return_top=None, **kwargs):
+    def euclidean(self, vec1, vec2, in_parallel):
+        if in_parallel:
+            # compute mse
+            metric_values = torch.sum(vec1**2, dim=1)[:, None] - 2 * torch.einsum('nd,md->nm', vec1, vec2) + torch.sum(vec2 ** 2, dim=1)[None, :]
+            metric_values = torch.nan_to_num(torch.sqrt(metric_values))
+            metric_values = metric_values.detach().cpu().numpy().ravel()
+        else:
+            metric_values = []
+            real_synthetic_pairs = list(product(vec1, vec2))
+            for r, s in real_synthetic_pairs:
+                metric_values.append(torch.linalg.norm(r-s))
+        return metric_values
 
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    def __call__(self, im1_dataloader, im2_dataloader, process_image_args=None, dimreduce_args=None, return_top=None, **kwargs):
 
-        alpha = kwargs["alpha"] if "alpha" in kwargs.keys() else 3.0
-        beta = kwargs["beta"] if "beta" in kwargs.keys() else 0.0
-        filter = kwargs["filter"] if "filter" in kwargs.keys() else "gaussian"
-        threshold = kwargs["threshold"] if "threshold" in kwargs.keys() else "segmentation"
-        fsize = kwargs["fsize"] if "fsize" in kwargs.keys() else 5
-        tsize = kwargs["tsize"] if "tsize" in kwargs.keys() else 50
+        device = torch.device("cuda:3" if torch.cuda.is_available() else "cpu")
 
         # select similarity metric function
         if self.metric_name == "MSE":
@@ -149,6 +155,8 @@ class ComputeSimilarity:
             # train PCA model on original dataset
             pca_model = PCAWithCosine(data=im1_dataloader, n_components=1000)
             func = lambda x, y: self.pcacosine(x, y, pca_model=pca_model, in_parallel=True)
+        elif self.metric_name == "euclidean":
+            func = lambda x, y: self.euclidean(x, y, in_parallel=True)
         else:
             raise Exception("Metrics can only be MSE/RMSE/SSIM/PCAWithCosine.")
 
@@ -156,31 +164,51 @@ class ComputeSimilarity:
         metrics = pd.DataFrame(
             columns=["gen_image_index", "real_image_index", "gen_image_path", "real_image_path", self.metric_name])
 
+        if dimreduce_args["do"]:
+            from image_encoder.ae_model import ConvolutionalAE
+            weights = torch.load(dimreduce_args["weights_path"])
+            autoencoder = ConvolutionalAE(im_size=512, latent_size=dimreduce_args["latent_size"])
+            autoencoder.load_state_dict(weights)
+            autoencoder.to(device)
+            autoencoder.eval()
+
         for i, spath, simages, _ in tqdm(im1_dataloader):
             for j, rpath, rimages, _ in im2_dataloader:
 
                 # cast tensors to integer type uint8
-                simages, rimages = (simages.to(device) * 255).type(torch.ByteTensor), (rimages.to(device) * 255).type(torch.ByteTensor)
-                assert len(simages.shape) == 4
-                assert len(rimages.shape) == 4
+                # simages, rimages = (simages * 255), (rimages * 255)
+
+                # assert len(simages.shape) == 4, simages.shape
+                # assert len(rimages.shape) == 4, rimages.shape
 
                 # compare real and synthetic pairs
                 real_synthetic_pair_idxs = np.array(list(product(i, j)))
                 real_synthetic_pair_paths = np.array(list(product(spath, rpath)))
 
-                if process_images:
-                    process_func = lambda x: self.process_images(x, alpha, beta, filter, fsize, threshold, tsize)
+                if process_image_args["do"]:
+
+                    process_func = lambda x: self.process_images(x,
+                     process_image_args["alpha"],
+                      process_image_args["beta"],
+                       process_image_args["filtering"]["kernel"],
+                        process_image_args["filtering"]["size"],
+                         process_image_args["thresholding"]["function"],
+                          process_image_args["thresholding"]["size"])
+
                     # process real and synthetic images
                     simages, rimages = np.uint8(simages.detach().cpu().numpy()), np.uint8(rimages.detach().cpu().numpy())
                     simages = np.array(list(map(process_func, simages)))
                     rimages = np.array(list(map(process_func, rimages)))
-                    # simages = [self.process_images(simages[i], alpha, beta, filter, fsize, threshold, tsize) for i in range(len(simages))]
-                    # rimages = [self.process_images(rimages[i], alpha, beta, filter, fsize, threshold, tsize) for i in range(len(rimages))]
+
                     type_ = torch.ByteTensor if device == "cpu" else torch.cuda.ByteTensor 
                     simages, rimages = torch.as_tensor(simages).type(type_), torch.as_tensor(rimages).type(type_)
+                
+                if dimreduce_args["do"]:
+                    # compress images into lower-dimensional space
+                    simages_encoded, rimages_encoded = autoencoder.encoder(simages.to(device)), autoencoder.encoder(rimages.to(device))
 
                 # compute similarity metric given two tensors of dimension (M, X, X) and (N, X, X)
-                metric_values = func(simages, rimages)
+                metric_values = func(simages_encoded, rimages_encoded)
 
                 assert len(metric_values) == len(real_synthetic_pair_paths), \
                     "Number of metric values computed = {}, Number of pairs found = {}".format(len(metric_values),
@@ -196,7 +224,7 @@ class ComputeSimilarity:
                 # update dataframe
                 metrics = pd.concat([metrics, df])
 
-        ascending = True if self.metric_name in ["MSE", "RMSE", "PSNR"] else False
+        ascending = True if self.metric_name in ["MSE", "RMSE", "PSNR", "euclidean"] else False
         metrics = metrics.sort_values(by=self.metric_name, ascending=ascending, ignore_index=True)
         if return_top is not None:
             return metrics.head(return_top)
@@ -652,291 +680,3 @@ def calc_mutual_information(gen_image, real_image):
     MI = 2 * MI / (-1 * np.sum(px[nxs] * np.log(px[nxs])) + -1 * np.sum(py[nys] * np.log(py[nys])))
     return MI
 
-
-# def calc_l2_norm(gen_imgs, real_imgs):
-#     """ Computes Euclidean Distance between generated and real images """
-#     result = torch.sum(gen_imgs**2, dim=(1, 2))[:, None] - 2*torch.einsum('nhw,mhw->nm', gen_imgs, real_imgs) + torch.sum(real_imgs**2, dim=(1,2))[None, :]
-#     return result
-
-
-# def calc_pearson_corr(gen_image, real_image):
-#     """ Computes Pearson Correlation Coefficient between generated and real images """
-#     from scipy.stats import pearsonr
-#     return pearsonr(gen_image.ravel(), real_image.ravel())[0]
-
-
-# def calc_img_similarity(gen_imgs, real_dataloader, similarity_metric, save_most_similar, save_most_different):
-#     """ Compares generated images to training dataset images to see how similar they are """
-#
-#     import time
-#     from concurrent.futures import ProcessPoolExecutor
-#     from itertools import product
-#     from sewar.full_ref import mse, rmse, ssim, scc, psnr
-#     from skimage.metrics import structural_similarity, mean_squared_error
-#
-#     # select similarity metric
-#     if similarity_metric == "MSE":
-#         metric = mean_squared_error
-#     elif similarity_metric == "RMSE":
-#         metric = rmse
-#     elif similarity_metric == "SSIM":
-#         metric = structural_similarity #StructuralSimilarity(device="cuda")
-#     elif similarity_metric == "corr":
-#         metric = calc_pearson_corr
-#     elif similarity_metric == "SCC":
-#         metric = scc
-#     elif similarity_metric == "PSNR":
-#         metric = psnr
-#     else:
-#         metric = None
-#
-#     # stores all the results for all gen_img/real_img pairs
-#     all_results = []
-#
-#     # stores the five most similar/different image-pairs for each iteration of the dataloader
-#     most_similar_images = []
-#     most_different_images = []
-#
-#     # stores the MI score for the five most similar/different image-pairs for each iteration of the dataloader
-#     intermediate_similar_results = []
-#     intermediate_different_results = []
-#
-#     print("Comparing original image with itself...")
-#     if similarity_metric == "SSIM":
-#         # calibrate = [metric(g.to("cuda")[None, None, :, :]*255, g.to("cuda")[None, None, :, :]*255) for g in gen_imgs]
-#         calibrate = [metric(np.uint8(g.numpy()*255), np.uint8(g.numpy()*255)) for g in gen_imgs]
-#     else:
-#         calibrate = [metric(np.uint8(g.numpy()*255), np.uint8(g.numpy()*255)) for g in gen_imgs]
-#     print(calibrate)
-#
-#     for real_batch, _ in tqdm(real_dataloader):
-#         # compute the similarity between generated images and batch of real images
-#         gen_real = list(product(gen_imgs, real_batch.squeeze()))
-#         if similarity_metric == "SSIM":
-#             # intermediate_results = [metric(g.to("cuda")[None, None, :, :]*255, r.to("cuda")[None, None, :, :]*255) for g, r in gen_real]
-#             intermediate_results = [metric(np.uint8(g.numpy() * 255), np.uint8(r.numpy() * 255)) for g, r in gen_real]
-#         else:
-#             intermediate_results = [metric(np.uint8(g.numpy() * 255), np.uint8(r.numpy() * 255)) for g, r in gen_real]
-#
-#         assert len(gen_real) == len(intermediate_results)
-#
-#         # sort the pairwise results based on similarity metric value
-#         gen_real = [gen_real[i] for i in np.argsort(intermediate_results)]
-#         intermediate_results = list(np.sort(intermediate_results))
-#
-#         # save the most similar from this batch of pairwise comparisons
-#         if save_most_similar:
-#             if similarity_metric in ["MSE", "RMSE"]: # if rmse or mse, then the smallest value is greatest similarity
-#                 most_similar_images += gen_real[:5]
-#                 intermediate_similar_results += intermediate_results[:5]
-#             else:
-#                 most_similar_images += gen_real[-5:]
-#                 intermediate_similar_results += intermediate_results[-5:]
-#         else:
-#             most_similar_images = []
-#
-#         if save_most_different:
-#             if similarity_metric in ["MSE", "RMSE"]:
-#                 most_different_images += gen_real[-5:]
-#                 intermediate_different_results += intermediate_results[-5:]
-#             else:
-#                 most_different_images += gen_real[:5]
-#                 intermediate_different_results += intermediate_results[:5]
-#         else:
-#             most_different_images = []
-#
-#         # save all the metrics between gen and real batch
-#         all_results += intermediate_results
-#
-#     assert len(most_similar_images) == len(intermediate_similar_results)
-#     assert len(most_different_images) == len(intermediate_different_results)
-#
-#     if save_most_similar:
-#         if similarity_metric in ["MSE", "RMSE"]:
-#             five_most_similar = [most_similar_images[i] for i in np.argsort(intermediate_similar_results)[:5]]
-#         else:
-#             five_most_similar = [most_similar_images[i] for i in np.argsort(intermediate_similar_results)[-5:]]
-#     else:
-#         five_most_similar = None
-#
-#     if save_most_different:
-#         if similarity_metric in ["MSE", "RMSE"]:
-#             five_most_different = [most_different_images[i] for i in np.argsort(intermediate_different_results)[-5:]]
-#         else:
-#             five_most_different = [most_different_images[i] for i in np.argsort(intermediate_different_results)[:5]]
-#     else:
-#         five_most_different = None
-#
-#     return all_results, five_most_similar, five_most_different
-#
-#
-# def calc_img_similarity_v2(synthetic_dataloader,
-#                            real_dataloader,
-#                            filter=None,
-#                            threshold=None,
-#                            similarity_metric="MSE",
-#                            return_top=None):
-#
-#     """ Compares generated images to training dataset images to see how similar they are """
-#
-#     from itertools import product
-#
-#     def process_image(image):
-#
-#         # basic image processing
-#         alpha = 3.0
-#         beta = 1.0
-#         image = alpha*image + beta
-#         image = np.clip(image, 0, 255)
-#
-#         if filter == "averaging":
-#             im_filtered = cv2.blur(image, (7, 7))
-#         elif filter == "gaussian":
-#             im_filtered = cv2.GaussianBlur(image, (7, 7), 0)
-#         elif filter == "median":
-#             im_filtered = cv2.medianBlur(image, 5, (7, 7))
-#         else:
-#             im_filtered = image
-#
-#         if threshold == "global":
-#             _, im_filtered = cv2.threshold(im_filtered, 50, 1, cv2.THRESH_BINARY_INV)
-#         elif threshold == "adaptive":
-#             im_filtered = cv2.adaptiveThreshold(im_filtered, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 11, 2)
-#         elif threshold == "segment":
-#             from utils.vesselsegmentor.blood_segmentation.generator import RetinalBloodVesselGenerator as segmentor
-#             seg = segmentor(net_type='unet', pretrained_model='utils/vesselsegmentor/models/unet.pth', using_gpu=False)
-#             im_filtered = Image.fromarray(im_filtered)
-#             im_filtered = np.array(seg.generate(im_filtered.convert("RGB")))
-#         return im_filtered
-#
-#     def metric(image_pairs, **kwargs):
-#         image1, image2 = image_pairs
-#         from sewar.full_ref import mse, rmse, ssim, scc, psnr
-#         from skimage.metrics import structural_similarity, mean_squared_error
-#         if similarity_metric == "MSE":
-#             sim = mean_squared_error(image1, image2)
-#         elif similarity_metric == "RMSE":
-#             sim = rmse(image1, image2)
-#         elif similarity_metric == "SSIM":
-#             sim = ssim(image1, image2)
-#         elif similarity_metric == "PearsonCorr":
-#             sim = calc_pearson_corr(image1, image2)
-#         elif similarity_metric == "PSNR":
-#             sim = psnr(image1, image2)
-#         elif similarity_metric == "PCAWithCosine":
-#             model = PCAWithCosine(data=real_dataloader, n_components=1000)
-#             sim = model(image1, image2, return_diagonal=kwargs["return_diagonal"])
-#         else:
-#             raise Exception("Incorrect metric specified!")
-#         return sim
-#
-#     # additional parameters to select most similar/different results
-#     ascending = True if similarity_metric in ["MSE", "RMSE", "PSNR"] else False
-#     in_parallel = True if similarity_metric in ["PCAWithCosine"] else False
-#
-#     print("Comparing real images versus themselves...")
-#     _, _, real_sample, _ = next(iter(real_dataloader))
-#     real_sample = (real_sample[:10]*255).numpy()
-#     real_vs_real = metric((real_sample, real_sample), return_diagonal=True)
-#     print(real_vs_real)
-#
-#     print("Comparing generated images versus themselves...")
-#     _, _, gen_sample, _ = next(iter(synthetic_dataloader))
-#     gen_sample = (gen_sample[:10] * 255).numpy()
-#     gen_vs_gen = metric((gen_sample, gen_sample), return_diagonal=True)
-#     print(gen_vs_gen)
-#
-#     # store metrics in one dataframe
-#     metrics = pd.DataFrame(columns=["gen_image_index", "real_image_index", "gen_image_path", "real_image_path", similarity_metric])
-#
-#     for i, spath, simages, stargets in synthetic_dataloader:
-#         for j, rpath, rimages, rtargets in tqdm(real_dataloader):
-#
-#             # compare real and synthetic pairs
-#             real_synthetic_pair_idxs = np.array(list(product(i, j)))
-#             real_synthetic_pair_paths = np.array(list(product(spath, rpath)))
-#
-#             # process real and synthetic images
-#             simages, rimages = np.uint8(simages.squeeze().numpy() * 255), np.uint8(rimages.squeeze().numpy() * 255)
-#
-#             # simages = [process_image(simages[i]) for i in range(simages.shape[0])]
-#             # rimages = [process_image(rimages[i]) for i in range(rimages.shape[0])]
-#
-#             # compute metric in parallel or sequentially
-#             if in_parallel:
-#                 metric_values = metric(simages, rimages).ravel()
-#             else:
-#                 real_synthetic_pairs = list(product(simages, rimages))
-#                 with ProcessPoolExecutor() as executor:
-#                     metric_values = executor.map(metric, real_synthetic_pairs)
-#                     # metric_values = [executor.submit(metric, s, r) for s, r in real_synthetic_pairs]
-#                     metric_values = [r.result() for r in concurrent.futures.as_completed(metric_values)]
-#
-#             assert len(metric_values) == len(real_synthetic_pair_paths),\
-#                 "Number of metric values computed = {}, Number of pairs found = {}".format(len(metric_values),
-#                                                                                            len(real_synthetic_pair_paths))
-#
-#             # save results to dataframe
-#             df = pd.DataFrame(np.concatenate((np.array(real_synthetic_pair_idxs), np.array(real_synthetic_pair_paths), np.array(metric_values)[:, None]), axis=1),
-#                               columns=["gen_image_index", "real_image_index", "gen_image_path", "real_image_path", similarity_metric])
-#
-#             # update dataframe
-#             metrics = metrics.append(df, ignore_index=True)
-#
-#     metrics = metrics.sort_values(by=similarity_metric, ascending=ascending, ignore_index=True)
-#     if return_top is not None:
-#         return metrics.head(return_top)
-#     else:
-#         return metrics
-
-# def calc_img_similarity(gen_imgs, real_dataloader, save_most_similar, save_most_different):
-#     """ Compares generated images to training dataset images to see how similar they are """
-#
-#     import time
-#     start = time.perf_counter()
-#
-#     five_most_similar = np.zeros((len(gen_imgs), ))
-#
-#     for g in gen_imgs:
-#         for real_batch, _ in tqdm(real_dataloader):
-#             intermediate_results = [calc_pearson_corr(g, r) for r in real_batch]
-#
-#             gen_real = [gen_real[i] for i in np.argsort(intermediate_results)]
-#             intermediate_results = list(np.sort(intermediate_results))
-#
-#             all_results += intermediate_results
-#             intermediate_results = []
-#
-#     if save_most_similar:
-#         five_most_similar = [most_similar_images[i] for i in np.argsort(intermediate_similar_results)[-5:]]
-#     else:
-#         five_most_similar = None
-#
-#     if save_most_different:
-#         five_most_different = [most_different_images[i] for i in np.argsort(intermediate_different_results)[:5]]
-#     else:
-#         five_most_different = None
-#
-#     finish = time.perf_counter()
-#     print("Finished in {} seconds".format(round(finish-start, 2)))
-#
-#     return all_results, five_most_similar, five_most_different
-
-# with ProcessPoolExecutor() as executor:
-#     batch_results = [executor.submit(calc_pearson_corr, g, r) for g, r in gen_real]
-#     # batch_results = [executor.submit(calc_l2_norm, gen_imgs, real_batch.squeeze())]
-#     for r in concurrent.futures.as_completed(batch_results):
-#         intermediate_results.append(r.result())
-#         # intermediate_results += list(r.result().reshape(gen_imgs.shape[0]*real_batch.shape[0]))
-
-
-        # real_vs_real_v2 = []
-        # for i in range(10):
-        #     for j in range(10):
-        #         real_vs_real_v2.append(metric(np.uint8(real_sample[i].numpy()*255), np.uint8(real_sample[j].numpy()*255)))
-        # print(real_vs_real)
-        # print(real_vs_real_v2)
-
-        # real_sample = np.uint8((real_sample*255).squeeze().numpy().reshape(len(real_sample), -1))
-        # real_sample_features = metric.pca_transformer.transform(real_sample)
-        # real_vs_real = (real_sample_features @ real_sample_features.T) / np.outer(np.linalg.norm(real_sample_features, axis=1), np.linalg.norm(real_sample_features, axis=1))

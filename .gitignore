@@ -1,0 +1,46 @@
+__pycache__
+.ipynb_checkpoints
+.vscode
+datasets
+# eye2gene_retraining/inception_model
+# eye2gene_retraining/simple_model
+# eye2gene_retraining/simple_model_again
+# eye2gene_retraining/efficientnet_model
+# eye2gene_retraining/densenet_model
+eye2gene_retraining/trained_models
+eye2gene_retraining/analysis
+eye2gene_retraining/eye2gene_retraining_logs.txt
+eye2gene_retraining/Eye2gene_retrained_results.ipynb
+eye2gene_retraining/Results-GAN.ipynb
+eye2gene_retraining/Results.ipynb
+eye2gene_retraining/simple_convnet
+graders_eval_images_stylegan2
+image_encoder/experiment_*
+image_encoder/*.csv
+image_encoder/*.ipynb
+models/__pycache__
+models/acgan
+models/biggan
+models/dcgan
+models/eye2gene
+models/pggan
+models/stylegan2
+models/wgan
+models/losses.py
+notebooks/UKBB_Data_Exploration.ipynb 
+notebooks/.ipynb_checkpoints
+notebooks/AutoEncoder Training.ipynb
+notebooks/autoencoder.py
+quantitative_results
+runs
+synthetic_datasets
+utils/__pycache__
+utils/train_utils/biggan_train.py
+utils/train_utils/dcgan_wgan_train.py
+utils/train_utils/pggan_train.py
+utils/generate_utils/dcgan_gen.py
+utils/vesselsegmentor
+Dockerfile
+load_umap_docker.sh
+requirements.txt
+misc

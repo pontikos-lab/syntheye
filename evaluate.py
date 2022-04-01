@@ -22,20 +22,23 @@ set_seed(1399)
 
 CONFIG_PATH = "configs/evaluate_configs.yaml"
 config = load_config(CONFIG_PATH)
+
 real_data_file = config["real_data_file"]
 synthetic_data_file = config["synthetic_data_file"]
+
 filenames_col = config["filenames_col"]
 labels_col = config["labels_col"]
+
 classes = config["classes"]
 if classes == "all":
     with open("classes.txt") as f:
         classes = f.read().splitlines()
-compute_similarity = config["similarity_check"]["compute"]
-alpha, beta = config["similarity_check"]["process_images"]["alpha"], config["similarity_check"]["process_images"]["beta"]
-filtering = config["similarity_check"]["process_images"]["filtering"]
-kernel, ksize = filtering["kernel"], filtering["size"]
-thresholding = config["similarity_check"]["process_images"]["thresholding"]
-threshfunc, tsize = thresholding["function"], thresholding["size"]
+
+compute_similarity = config["similarity_check"]["do"]
+
+preprocess_images = config["similarity_check"]["process_images"]
+dimreduce = config["similarity_check"]["dimreduce"]
+
 similarity_metric = config["similarity_check"]["similarity_metric"]
 save_most_similar = config["similarity_check"]["save_most_similar"]
 save_most_different = config["similarity_check"]["save_most_different"]
@@ -50,10 +53,13 @@ if config['transformations']['resize_dim'] is not None:
     resize_dim = config['transformations']['resize_dim']
     image_transforms.append(transforms.Resize((resize_dim, resize_dim)))
 # grayscale image conversion
-if config['transformations']['grayscale']:
-    image_transforms.append(transforms.Grayscale())
+if config['transformations']['grayscale'] is not None:
+    gs_channels = config['transformations']['grayscale']
+    image_transforms.append(transforms.Grayscale(gs_channels))
 # compulsory - transformation to torch tensor
 image_transforms.append(transforms.ToTensor())
+if config['transformations']['normalize'] is not None:
+    image_transforms.append(transforms.Normalize((0.5,), (0.5,)))
 
 # ========================
 # Begin Evaluation
@@ -94,24 +100,20 @@ if compute_similarity:
         if verbose:
             print("Scoring class {}".format(c))
 
+        # load datasets and dataloaders for the specific class
         real_data = ImageDataset(real_data_file, filenames_col, labels_col, [c], transforms.Compose(image_transforms))
-        real_dataloader = DataLoader(real_data, batch_size=1024, shuffle=False, num_workers=8)
+        real_dataloader = DataLoader(real_data, batch_size=64, shuffle=False, num_workers=8)
         synthetic_data = ImageDataset(synthetic_data_file, filenames_col, labels_col, [c], transforms.Compose(image_transforms))
-        synthetic_dataloader = DataLoader(synthetic_data, batch_size=1024, shuffle=False, num_workers=8)
+        synthetic_dataloader = DataLoader(synthetic_data, batch_size=64, shuffle=False, num_workers=8)
 
-        # pass real images with generated images into the image similarity function
+        # pass real images and synthetic images into the image similarity function
         sim_scores_per_class[c] = ComputeSimilarity(metric_name=similarity_metric)(synthetic_dataloader,
                                                                                    real_dataloader,
-                                                                                   process_images=True,
-                                                                                   alpha=alpha,
-                                                                                   beta=beta,
-                                                                                   filter=kernel,
-                                                                                   fsize=ksize,
-                                                                                   threshold=threshfunc,
-                                                                                   tsize=tsize)
+                                                                                   process_image_args=preprocess_images,
+                                                                                   dimreduce_args=dimreduce)
 
         # save distance matrix
-        sim_scores_per_class[c].to_csv(os.path.join(save_dir, "{}_distance_matrix.csv".format(c)))
+        sim_scores_per_class[c].to_csv(os.path.join(save_dir, "{}_distance_matrix.csv".format(c)), index=False)
 
         if save_most_similar:
             most_similar_images = sim_scores_per_class[c].head(5).reset_index(drop=True)
