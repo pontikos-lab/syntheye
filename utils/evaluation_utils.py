@@ -138,6 +138,14 @@ class ComputeSimilarity:
                 metric_values.append(torch.linalg.norm(r-s))
         return metric_values
 
+    def cosine(self, vec1, vec2, in_parallel):
+        if in_parallel:
+            norms = torch.linalg.norm(vec1, dim=1)[:, None] @ torch.linalg.norm(vec2, dim=1)[None, :]
+            cosine_sim = torch.divide(torch.einsum('nd,md->nm', vec1, vec2), norms)
+            return cosine_sim.detach().cpu().numpy().ravel()
+        else:
+            return torch.nn.CosineSimilarity()(vec1, vec2)
+
     def __call__(self, im1_dataloader, im2_dataloader, process_image_args=None, dimreduce_args=None, return_top=None, **kwargs):
 
         device = torch.device("cuda:3" if torch.cuda.is_available() else "cpu")
@@ -157,6 +165,8 @@ class ComputeSimilarity:
             func = lambda x, y: self.pcacosine(x, y, pca_model=pca_model, in_parallel=True)
         elif self.metric_name == "euclidean":
             func = lambda x, y: self.euclidean(x, y, in_parallel=True)
+        elif self.metric_name == "cosine":
+            func = lambda x, y: self.cosine(x, y, in_parallel=True)
         else:
             raise Exception("Metrics can only be MSE/RMSE/SSIM/PCAWithCosine.")
 

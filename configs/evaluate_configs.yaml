@@ -10,7 +10,7 @@ transformations:
   normalize: 1
 
 # EVALUATION SETTINGS
-save_dir: quantitative_results/stylegan2_results/real_vs_real_euclidean
+save_dir: quantitative_results/stylegan2_results/real_vs_real_cosine
 similarity_check:
   do: 1
   process_images:
@@ -27,9 +27,9 @@ similarity_check:
     do: 1
     latent_size: 1024
     weights_path: /home/zchayav/projects/syntheye/image_encoder/experiment_6/best_weights.pth
-  similarity_metric: euclidean
+  similarity_metric: cosine
   save_most_similar: 1
-  save_most_different: 1
+  save_most_different: 0
 quality_check:
   compute: 0
   quality_metric: BRISQUE
