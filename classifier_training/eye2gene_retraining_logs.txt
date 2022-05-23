@@ -1,0 +1,4 @@
+Filenames:
+- Eye2gene retrained with 50 images per class: 16122021-112343-InceptionV3-100e-128bs-0.0001lr(.h5/.json)
+- Eye2gene retrained with 100 images per class: 17122021-114946-InceptionV3-100e-128bs-0.0001lr(.h5/.json)
+- Eye2gene retrained with rebalanced dataset: 17122021-043559-InceptionV3-100e-128bs-0.0001lr(.h5/.json)
