@@ -1,5 +1,6 @@
-TEST_DIR=/home/zchayav/projects/syntheye/datasets/eye2gene_new_filepaths/all_baf_valid_50deg_filtered_val_0_edited.csv
-MODEL_DIR=inception_model/all_folds_retraining/rebalanced
+#!/usr/bin/bash
+TEST_DIR=/home/zchayav/projects/syntheye/datasets/syntheye/testset_just_5_classes.csv
+MODEL_DIR=trained_models/vit_5classes_rebalanced
 WEIGHTS=best_weights.pth
 CONFIG=model_config.json
 DEVICE=2
