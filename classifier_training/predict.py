@@ -26,10 +26,10 @@ from typing import Any
 # set global variables
 FPATH_COL_NAME = "file.path"
 LBL_COL_NAME = "gene"
-CLASS_MAPPING = "../classes_mapping_five.json"
+CLASS_MAPPING = "../classes_mapping.json"
 CLASS2IDX = json.load(open(CLASS_MAPPING))
 IDX2CLASS = {v:k for k, v in CLASS2IDX.items()}
-N_CLASSES = 5
+N_CLASSES = 36
 
 def parse_args() -> dict:
     # for parsing command-line arguments
@@ -79,7 +79,7 @@ def load_data(test_fpath: str, config: dict) -> Any:
     test_transforms = transforms.Compose(test_transforms)
 
     log("Loading Dataset")
-    test_data = ImageDataset(data_file=test_fpath, fpath_col_name=FPATH_COL_NAME, lbl_col_name=LBL_COL_NAME, class_vals=CLASSES, transforms=test_transforms, class_mapping=CLASS_MAPPING)
+    test_data = ImageDataset(data_file=test_fpath, fpath_col_name=FPATH_COL_NAME, lbl_col_name=LBL_COL_NAME, class_vals=CLASSES, transforms=test_transforms, class_mapping=CLASS_MAPPING, fold="test")
     log("{} test images found belonging to {} classes".format(len(test_data), len(test_data.classes)))
 
     log("Preparing batch loaders from datasets")
@@ -103,6 +103,7 @@ def load_model(config: dict, weights: str) -> torch.nn.Module:
         # edit the last layer to have 36 layers only
         model.AuxLogits.fc = nn.Linear(768, N_CLASSES)
         model.fc = nn.Linear(2048, N_CLASSES)
+        # model = nn.DataParallel(model, device_ids=device)
 
     elif name == "resnet18":
         model = torchvision.models.resnet18(pretrained=True)
@@ -139,15 +140,11 @@ def load_model(config: dict, weights: str) -> torch.nn.Module:
     else:
         raise ValueError("Model can only be `inceptionv3`, `vgg16` or `resnet18`")
 
-    model.load_state_dict(torch.load(weights))
+    model.load_state_dict(torch.load(weights, map_location=f"cuda:{3}"))
 
     return model
 
 def predict(model: torch.nn.Module, dataloader: Any, device: Any = None, save_dir: str = None) -> pd.DataFrame:
-
-    # create dataframe to store results in
-    columns=["file.path", "True Class", "Predicted Class", *("Prob_{}".format(gene) for gene in dataloader.dataset.classes)]
-    results_df = pd.DataFrame(columns=columns)
 
     # push to device
     if isinstance(device, int):
@@ -160,6 +157,13 @@ def predict(model: torch.nn.Module, dataloader: Any, device: Any = None, save_di
     else:
         model.to("cpu")
         base_device = "cpu"
+
+    # create dataframe to store results in
+    prediction_columns = ["file.path", "True Class", "Predicted Class"] 
+    probability_columns = [f"Prob_{gene}" for gene in dataloader.dataset.classes]
+    
+    predictions_df = pd.DataFrame(columns=prediction_columns)
+    probabilities_df = pd.DataFrame(columns=probability_columns)
     
     model.eval()
     running_corrects = 0
@@ -178,11 +182,19 @@ def predict(model: torch.nn.Module, dataloader: Any, device: Any = None, save_di
         running_corrects += torch.sum(final_preds == labels.data)
 
         # add results to dataframe
+        row = pd.DataFrame(columns=prediction_columns)
+        row['file.path'] = np.array(fpath)
         true_labels = np.array(list(map(idx2class, labels.cpu().detach().numpy())))
+        row['True Class'] = true_labels
         pred_labels = np.array(list(map(idx2class, final_preds.cpu().detach().numpy())))
-        row_result = np.concatenate([np.array(fpath)[:, None], true_labels[:, None], pred_labels[:, None], raw_preds.cpu().detach().numpy()], axis=1)
-        row_df = pd.DataFrame(row_result, columns=columns)
-        results_df = pd.concat([results_df, row_df])
+        row['Predicted Class'] = pred_labels
+        predictions_df = pd.concat([predictions_df, row], ignore_index=True)
+        
+        raw_preds = raw_preds.cpu().detach().numpy()
+        row2 = pd.DataFrame(data=raw_preds, columns=probability_columns)
+        probabilities_df = pd.concat([probabilities_df, row2], ignore_index=True)
+
+    results_df = pd.concat([predictions_df, probabilities_df], axis=1)
 
     # statistics averaged over entire training set
     acc = running_corrects.double() / len(dataloader.dataset)
@@ -194,7 +206,8 @@ def predict(model: torch.nn.Module, dataloader: Any, device: Any = None, save_di
 
 def create_confusion(results_df: pd.DataFrame, save_dir: str):
 
-    CLASSES = list(json.load(open(CLASS_MAPPING)).keys())
+    with open("../classes.txt") as f:
+        CLASSES = f.read().splitlines() # list(json.load(open(CLASS_MAPPING)).keys())
     
     log("Creating confusion matrix...")
     
@@ -202,13 +215,13 @@ def create_confusion(results_df: pd.DataFrame, save_dir: str):
     predicted_labels = results_df["Predicted Class"].values
     true_labels = results_df["True Class"].values
     from sklearn.metrics import confusion_matrix
-    confusion_matrix = confusion_matrix(true_labels, predicted_labels)
+    confusion_matrix = confusion_matrix(true_labels, predicted_labels, labels=CLASSES)
     with open(os.path.join(save_dir, "cm.npy"), 'wb') as f:
         np.save(f, confusion_matrix)
 
     # visualize matrix
     plt.figure(figsize=(25, 12))
-    sns.heatmap(confusion_matrix, annot=True, fmt="g", xticklabels=CLASSES, yticklabels=CLASSES, cmap="YlGnBu")
+    sns.heatmap(confusion_matrix, annot=True, fmt="g", xticklabels=CLASSES, yticklabels=CLASSES, cmap="YlGnBu") 
     plt.title("Confusion Matrix")
     plt.ylabel("True Label")
     plt.xlabel("Predicted Label")
@@ -217,20 +230,13 @@ def create_confusion(results_df: pd.DataFrame, save_dir: str):
 
 def calc_accuracies(df: pd.DataFrame, save_dir: str):
 
-    # classes = ["ABCA4", "BBS1", "BEST1", "CACNA1F", "CDH23", "CERKL", "CHM", "CNGA3", "CNGB3",
-        #    "CRB1", "CRX", "CYP4V2", "EFEMP1", "EYS", "GUCY2D", "KCNV2", "MERTK", "MTTL1",
-        #    "MYO7A", "NR2E3", "OPA1", "PDE6B", "PROML1", "PRPF31", "PRPF8", "PRPH2", "RDH12",
-        #    "RHO", "RP1", "RP1L1", "RP2", "RPE65", "RPGR", "RS1", "TIMP3", "USH2A"]
-
-    # idx2class = {i: cls for i, cls in enumerate(classes)}
-    # idx_mapper = lambda i: idx2class[i]
-
     classes = list(CLASS2IDX.keys())
 
     true_classes = df["True Class"]
     pandas_query = ['Prob_' + cls for cls in classes]
-    per_class_probs = df[pandas_query].values
-    per_class_probs = np.argsort(per_class_probs, axis=1)
+    per_class_probs = df[pandas_query]
+
+    per_class_probs = np.argsort(per_class_probs.values, axis=1) 
 
     accuracies = {}
     for top in [1, 2, 3, 5, 10, 20, 36]:
@@ -241,6 +247,7 @@ def calc_accuracies(df: pd.DataFrame, save_dir: str):
             else:
                 acc += 0
         acc = acc / len(df)
+        print(f"Top {top} accuracy = {acc}")
         accuracies["Top-{}".format(top)] = acc
     
     with open(os.path.join(save_dir, "accuracies.json"), 'w') as f:
@@ -285,7 +292,7 @@ if __name__ == "__main__":
     # optionally create results
     if args.confusion:
         create_confusion(results, args.save_dir)
-
+   
     if args.top_acc:
         calc_accuracies(results, args.save_dir)
 
