@@ -15,7 +15,7 @@ from clutils import logger, save_config, set_seed
 MODEL_CHOICES = ["inceptionv3", "resnet18", "vgg16", "simple", "alexnet", "vgg11", "efficient-net-b3", "densenet169", "simple-convnet", "feature-based", "vit"]
 FPATH_COL_NAME = "file.path"
 LBL_COL_NAME = "gene"
-CLASS_MAPPING = "../classes_mapping_five.json"
+CLASS_MAPPING = "../classes_mapping.json"
 CRITERION = torch.nn.CrossEntropyLoss()
 OPTIMIZER = lambda x, y, z: torch.optim.Adam(x, lr=y, weight_decay=z)
 
