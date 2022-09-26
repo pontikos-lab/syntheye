@@ -3,6 +3,7 @@ import os
 import numpy as np
 import pandas as pd
 from matplotlib import pyplot as plt
+import seaborn as sns
 from sklearn.metrics import roc_curve, roc_auc_score
 
 def get_predictions(path, classes=None):
@@ -14,16 +15,16 @@ def get_predictions(path, classes=None):
         df = pd.concat([df[cols1], df[cols2]], axis=1)
     return df
 
-def make_confusion_matrix(df, visualize=True, **kwargs):
+def make_confusion_matrix(df, visualize=True, save=None, **kwargs):
     predictions = df['Predicted Class'].values
     targets = df['True Class'].values
     from sklearn.metrics import confusion_matrix
-    cm = confusion_matrix(targets, predictions, labels=kwargs['labels'] if 'labels' in kwargs.keys() else None)
+    cm = confusion_matrix(targets, predictions, normalize='true', labels=kwargs['labels'] if 'labels' in kwargs.keys() else None)
     
     if visualize:
         labels = kwargs['labels'] if 'labels' in kwargs.keys() else None
         title = kwargs['title'] if 'title' in kwargs.keys() else None
-        plot_cm(cm, labels, title)
+        plot_cm(cm, labels, title, save=save)
         
     return cm
 
@@ -90,19 +91,31 @@ class AUROC():
         return per_class_statistics, macro_statistics
                 
 # visualization functions
-def plot_cm(cm, labels=None, title=None):
+def plot_cm(cm, labels=None, title=None, save=None):
     ''' Plot the confusion matrix as a heatmap '''
     from sklearn.metrics import ConfusionMatrixDisplay
     
     disp = ConfusionMatrixDisplay(cm, display_labels=labels)
+    
     fig, ax = plt.subplots(figsize=(20,20))
-    disp.plot(ax=ax)
+    disp.plot(ax=ax, values_format='.2f', colorbar=False)
     plt.xticks(rotation=45)
+    plt.colorbar(disp.im_, fraction=0.046, pad=0.04)
+#     sns.heatmap(cm, fmt='d', annot=True, square=True,
+#                 xticklabels=labels, yticklabels=labels,
+#                 cmap='gray_r', vmin=0, vmax=0,  # set all to white
+#                 linewidths=0.5, linecolor='k',  # draw black grid lines
+#                 cbar=False)                     # disable colorbar
+
+#     # re-enable outer spines
+#     sns.despine(left=False, right=False, top=False, bottom=False)
     plt.title(title)
+    if save is not None:
+        plt.savefig(save)
     plt.show()
     plt.close()
     
-def make_barplot(cm, labels=None, title=None, normalize=True):
+def make_barplot(cm, labels=None, title=None, normalize=True, order=None, save=None):
     ''' Plot barplots representing per-class prediction frequencies '''
     pred_freq = np.sum(cm, axis=0)
     true_freq = np.sum(cm, axis=1)
@@ -120,9 +133,11 @@ def make_barplot(cm, labels=None, title=None, normalize=True):
     data = pd.concat([pred_freq, true_freq], axis=0)
 
     plt.figure(figsize=(12, 6))
-    sns.barplot(data=data, x='Class', y='Frequency', hue='Type')
+    sns.barplot(data=data, x='Class', y='Frequency', hue='Type', order=order)
     plt.xticks(rotation=45)
     plt.title(title)
+    if save is not None:
+        plt.savefig(save)
     plt.show()
     plt.close()
 
