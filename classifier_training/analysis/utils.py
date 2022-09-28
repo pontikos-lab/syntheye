@@ -6,13 +6,15 @@ from matplotlib import pyplot as plt
 import seaborn as sns
 from sklearn.metrics import roc_curve, roc_auc_score
 
-def get_predictions(path, classes=None):
+def get_predictions(path, classes=None, apply=None):
     ''' Returns predictions dataframe with class probabilities '''
     df = pd.read_csv(path)
     if classes is not None:
         cols1 = ['file.path', 'patient.number', 'laterality', 'True Class', 'Predicted Class']
         cols2 = classes
         df = pd.concat([df[cols1], df[cols2]], axis=1)
+    if apply is not None:
+        df = apply(df)
     return df
 
 def make_confusion_matrix(df, visualize=True, save=None, **kwargs):
