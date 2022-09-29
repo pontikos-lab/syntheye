@@ -5,6 +5,7 @@ import pandas as pd
 from matplotlib import pyplot as plt
 import seaborn as sns
 from sklearn.metrics import roc_curve, roc_auc_score
+from delong import delong_roc_test
 
 def get_predictions(path, classes=None, apply=None):
     ''' Returns predictions dataframe with class probabilities '''
@@ -49,7 +50,7 @@ class AUROC():
             idxs = np.random.randint(low=0, high=len(df), size=(len(df),))
         df = df.iloc[idxs]
         return df
-
+    
     def __call__(self, nboot=500, random_state=None):
         from sklearn.metrics import roc_auc_score
 
@@ -143,7 +144,7 @@ def make_barplot(cm, labels=None, title=None, normalize=True, order=None, save=N
     plt.show()
     plt.close()
 
-def plot_roc(nrows, ncols, models, model_stats, labels, title):
+def plot_roc(nrows, ncols, models, model_stats, labels, title, base, save=None):
     
     from sklearn.metrics import roc_curve, roc_auc_score
     
@@ -156,15 +157,28 @@ def plot_roc(nrows, ncols, models, model_stats, labels, title):
         
         r = i // ncols
         c = i % ncols
+        
+        # get baseline scores
+        gt = np.array(list(map(int, list(models[base]['True Class'] == cls))))
+        probs_base = models[base][f'Prob_{cls}']
 
         # plot model ROC curves
         for m in models.keys():
-            df = models[m].copy(deep=True)
-            df['True Class'] = list(map(int, list(df['True Class'] == cls)))
-            fpr, tpr, _ = roc_curve(df['True Class'], df[f'Prob_{cls}'])
-            stats = model_stats[m][0]
-            axs[r,c].plot(fpr, tpr, alpha=1., lw=1, label='{}: {:.2f}'.format(m.split('_')[0], stats[stats['Class'] == cls]['auroc'].item()))
             
+            # binarize data
+            df = models[m].copy(deep=True)
+#             df['True Class'] = list(map(int, list(df['True Class'] == cls)))
+            fpr, tpr, _ = roc_curve(gt, df[f'Prob_{cls}'])
+            stats = model_stats[m][0]
+            if m != base:
+                delong_pval = 10**delong_roc_test(gt, probs_base, df[f'Prob_{cls}'])
+                if delong_pval < 0.05:
+                    axs[r,c].plot(fpr, tpr, alpha=1., lw=1, label='{}: {:.3f}*'.format(m.split('_')[0], stats[stats['Class'] == cls]['auroc'].item()))
+                else:
+                    axs[r,c].plot(fpr, tpr, alpha=1., lw=1, label='{}: {:.3f}'.format(m.split('_')[0], stats[stats['Class'] == cls]['auroc'].item()))
+            else:
+                axs[r,c].plot(fpr, tpr, alpha=1., lw=1, label='{}: {:.3f}'.format(m.split('_')[0], stats[stats['Class'] == cls]['auroc'].item()))
+                
         # define auc in legend
         axs[r,c].legend(title='Area under Curve')
             
@@ -180,5 +194,31 @@ def plot_roc(nrows, ncols, models, model_stats, labels, title):
     fig.suptitle(title, fontsize=16, y=1)
     
     plt.tight_layout()
+    if save is not None:
+        plt.savefig(save)
     plt.show()
     plt.close()
+    
+def run_delong_test(preds1, preds2, labels):
+    
+    def binarize(df, c):
+        df1 = df.copy(deep=True)
+        df1['True Class'] = list(map(int, list(df1['True Class'] == c)))
+        return df1
+    
+    pvals_per_class = dict()
+    
+    for l in labels:
+        
+        df1 = binarize(preds1, l)
+        df2 = binarize(preds2, l)
+        
+        gt = df1['True Class']
+        prob1 = df1[f'Prob_{l}']
+        prob2 = df2[f'Prob_{l}']
+        
+        pval = 10**delong_roc_test(gt, prob1, prob2)
+        
+        pvals_per_class[l] = pval.item()
+    
+    return pvals_per_class

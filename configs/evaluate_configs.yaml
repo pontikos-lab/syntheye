@@ -1,16 +1,16 @@
 # DATA
-real_data_file: /home/zchayav/projects/syntheye/datasets/eye2gene_new_filepaths/all_baf_valid_50deg_filtered_train_0_NOREPEATS.csv
-synthetic_data_file: /home/zchayav/projects/syntheye/datasets/eye2gene_new_filepaths/all_baf_valid_50deg_filtered_train_0_NOREPEATS.csv
+real_data_file: /home/zchayav/projects/syntheye/euclidean_results/real_wo_repeats.csv
+synthetic_data_file: /home/zchayav/projects/syntheye/euclidean_results/synth.csv
 filenames_col: file.path
 labels_col: gene
 classes: all
 transformations:
-  resize_dim: 512
-  grayscale: 1
+  resize_dim: 299
+  grayscale: 3
   normalize: 1
 
 # EVALUATION SETTINGS
-save_dir: quantitative_results/stylegan2_results/real_vs_real_cosine
+save_dir: euclidean_results/real_vs_synthetic/
 similarity_check:
   do: 1
   process_images:
@@ -25,9 +25,8 @@ similarity_check:
       size:
   dimreduce:
     do: 1
-    latent_size: 1024
-    weights_path: /home/zchayav/projects/syntheye/image_encoder/experiment_6/best_weights.pth
-  similarity_metric: cosine
+    weights_path: /home/zchayav/projects/syntheye/classifier_training/experiments/best_weights.pth
+  similarity_metric: euclidean
   save_most_similar: 1
   save_most_different: 0
 quality_check:

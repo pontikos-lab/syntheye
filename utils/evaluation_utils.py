@@ -175,12 +175,15 @@ class ComputeSimilarity:
             columns=["gen_image_index", "real_image_index", "gen_image_path", "real_image_path", self.metric_name])
 
         if dimreduce_args["do"]:
-            from image_encoder.ae_model import ConvolutionalAE
-            weights = torch.load(dimreduce_args["weights_path"])
-            autoencoder = ConvolutionalAE(im_size=512, latent_size=dimreduce_args["latent_size"])
-            autoencoder.load_state_dict(weights)
-            autoencoder.to(device)
-            autoencoder.eval()
+            from torchvision.models import inception_v3
+            model_weights = torch.load("/home/zchayav/projects/syntheye/classifier_training/experiments/best_weights.pth", map_location='cpu')
+            model = inception_v3(pretrained=True)
+            model.AuxLogits.fc = torch.nn.Linear(768, 36)
+            model.fc = torch.nn.Linear(2048, 36)
+            model.load_state_dict(model_weights)
+            model.fc = torch.nn.Identity()
+            model.to("cuda:3")
+            model.eval()
 
         for i, spath, simages, _ in tqdm(im1_dataloader):
             for j, rpath, rimages, _ in im2_dataloader:
@@ -215,7 +218,7 @@ class ComputeSimilarity:
                 
                 if dimreduce_args["do"]:
                     # compress images into lower-dimensional space
-                    simages_encoded, rimages_encoded = autoencoder.encoder(simages.to(device)), autoencoder.encoder(rimages.to(device))
+                    simages_encoded, rimages_encoded = model(simages.to(device)), model(rimages.to(device))
 
                 # compute similarity metric given two tensors of dimension (M, X, X) and (N, X, X)
                 metric_values = func(simages_encoded, rimages_encoded)

@@ -59,7 +59,7 @@ if config['transformations']['grayscale'] is not None:
 # compulsory - transformation to torch tensor
 image_transforms.append(transforms.ToTensor())
 if config['transformations']['normalize'] is not None:
-    image_transforms.append(transforms.Normalize((0.5,), (0.5,)))
+    image_transforms.append(transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)))
 
 # ========================
 # Begin Evaluation
@@ -101,10 +101,10 @@ if compute_similarity:
             print("Scoring class {}".format(c))
 
         # load datasets and dataloaders for the specific class
-        real_data = ImageDataset(real_data_file, filenames_col, labels_col, [c], transforms.Compose(image_transforms))
-        real_dataloader = DataLoader(real_data, batch_size=64, shuffle=False, num_workers=8)
-        synthetic_data = ImageDataset(synthetic_data_file, filenames_col, labels_col, [c], transforms.Compose(image_transforms))
-        synthetic_dataloader = DataLoader(synthetic_data, batch_size=64, shuffle=False, num_workers=8)
+        real_data = ImageDataset(real_data_file, filenames_col, labels_col, class_vals=[c], class_mapping='classes_mapping.json', transforms=transforms.Compose(image_transforms))
+        real_dataloader = DataLoader(real_data, batch_size=16, shuffle=False, num_workers=8)
+        synthetic_data = ImageDataset(synthetic_data_file, filenames_col, labels_col, class_vals=[c], class_mapping='classes_mapping.json', transforms=transforms.Compose(image_transforms))
+        synthetic_dataloader = DataLoader(synthetic_data, batch_size=16, shuffle=False, num_workers=8)
 
         # pass real images and synthetic images into the image similarity function
         sim_scores_per_class[c] = ComputeSimilarity(metric_name=similarity_metric)(synthetic_dataloader,

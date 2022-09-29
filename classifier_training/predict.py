@@ -79,7 +79,7 @@ def load_data(test_fpath: str, config: dict) -> Any:
     test_transforms = transforms.Compose(test_transforms)
 
     log("Loading Dataset")
-    test_data = ImageDataset(data_file=test_fpath, fpath_col_name=FPATH_COL_NAME, lbl_col_name=LBL_COL_NAME, class_vals=CLASSES, transforms=test_transforms, class_mapping=CLASS_MAPPING, fold="test")
+    test_data = ImageDataset(data_file=test_fpath, fpath_col_name=FPATH_COL_NAME, lbl_col_name=LBL_COL_NAME, class_vals=CLASSES, transforms=test_transforms, class_mapping=CLASS_MAPPING)
     log("{} test images found belonging to {} classes".format(len(test_data), len(test_data.classes)))
 
     log("Preparing batch loaders from datasets")
